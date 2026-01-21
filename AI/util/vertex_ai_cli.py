@@ -101,6 +101,8 @@ def generate_content_cmd(client: VertexAIClient, prompt: str, stream: bool = Fal
         chat_stream(client, prompt)
     else:
         response = client.generate_content(prompt)
+        if response is None:
+            response = ""
         if json_output:
             # Try to extract JSON block
             json_match = re.search(r'```json\s*(.*?)\s*```', response, re.DOTALL)

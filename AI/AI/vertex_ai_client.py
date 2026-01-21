@@ -329,7 +329,7 @@ class VertexAIClient:
             config=config
         )
         
-        return response.text
+        return response.text or ""
     
     def generate_content_stream(
         self,
