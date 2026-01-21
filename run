@@ -1,0 +1,5 @@
+pm2 start "npx n8n" --name n8n
+cd AI
+pm2 start run_api.sh --name "ai-api" --interpreter bash
+cd ../Trading
+pm2 start run_api.sh --name "trading-api" --interpreter bash

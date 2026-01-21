@@ -1,0 +1,61 @@
+options:
+  synthetic_long:
+    min_days_to_expiration: 7    # Minimum days to expiration to search for
+    search_window_days: 7        # Number of days after min_days to include in search
+    default_protection_pct: 5.0   # Default protective put percentage OTM
+    default_amount: 5000.0        # Default notional dollar amount to invest
+
+  bull_put_spread:
+    min_days_to_expiration: 30   # Minimum DTE (30-45 days ideal for theta decay)
+    search_window_days: 14       # Number of days after min_days to include
+    default_short_delta: 0.30    # Target delta for short put (30 delta = ~70% P(OTM))
+    default_short_pct: 5.0       # Fallback: short put % below spot (if delta unavailable)
+    default_width: 5.0           # Default spread width in dollars
+    default_amount: 0.0          # Default max risk amount (0 = use quantity instead)
+    # Quality filters
+    min_iv_rank: 0.30            # Minimum IV rank to enter (sell premium when IV is elevated)
+    min_credit_pct: 0.20         # Minimum credit as % of width (Adjusted to 20% for broad market viability)
+    min_open_interest: 100       # Minimum open interest on both legs
+    max_bid_ask_spread_pct: 0.20 # Maximum bid-ask spread % (liquidity filter)
+
+option_scan:
+  default_strategy: synthetic_long # Default strategy to run if not specified in CLI
+  max_scan_count: 50            # Limit number of stocks to scan (Top N by Market Cap)
+  min_price: 15.0               # Minimum stock price to consider
+  min_volume: 2000000           # Minimum daily trading volume
+  max_spread_pct: 0.005         # Maximum Bid-Ask spread percentage (0.5%) for Stock
+  max_option_spread_pct: 0.10   # Maximum Bid-Ask spread percentage (10%) for Option Legs
+  max_div_yield: 0.015          # Maximum Dividend Yield (1.5%) to avoid assignment risk
+  
+  # Momentum Indicators
+  rsi_min: 50.0                 # Minimum RSI (Momentum Floor)
+  rsi_max: 75.0                 # Maximum RSI (Momentum Ceiling - avoid overbought)
+  min_adx: 20.0                 # Minimum ADX for trend strength (20=weak, 25=strong, 40+=very strong)
+  min_rel_volume: 0.8           # Minimum relative volume (1.0 = average, 0.8 = 80% of average)
+  require_macd_bullish: true    # Require MACD to be above signal line
+  
+  # Implied Volatility Filters
+  iv_max_threshold: 0.45        # Maximum Implied Volatility (45%)
+  iv_hv_ratio_threshold: 1.25   # Maximum IV/HV Ratio (1.25 means IV is 25% higher than Realized)
+  skew_tolerance: 0.04          # Maximum difference between Put/Call IV (Skew)
+  
+  # Days to Expiration
+  target_dte_min: 10            # Minimum Days to Expiration for options
+  target_dte_max: 21            # Maximum Days to Expiration for options
+  
+  # Open Interest & Liquidity
+  min_open_interest: 50         # Minimum Open Interest on target strikes
+  
+  # Strike Selection
+  target_moneyness: 1.0         # Strike moneyness target (1.0=ATM, 0.98=2% ITM, 1.02=2% OTM)
+  
+  # Greeks-Based Filters
+  min_net_delta: 0.90           # Minimum net delta for synthetic position (target ~1.0)
+  max_theta_pct: 0.005          # Maximum daily theta as % of position (0.5%)
+  
+  # Position Sizing (used for suggested quantity calculation)
+  account_size: 100000          # Account size in dollars for position sizing
+  max_risk_per_trade: 0.02      # Maximum risk per trade as % of account (2%)
+  
+  # Recommendations
+  recommendation_count: 5       # Number of near-miss candidates to show when no matches found

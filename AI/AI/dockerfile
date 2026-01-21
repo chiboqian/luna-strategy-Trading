@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy all files including your script
+COPY . .
+
+# Ensure the script is executable
+RUN chmod +x /app/run_api.sh
+
+EXPOSE 80
+
+# Use the script as the entry point
+CMD ["./run_api.sh"]

@@ -1,0 +1,28 @@
+Bull Put Spread: SPY
+==============================
+Date: 2026-01-18 10:50:38
+Current Price: $691.58
+Expiration: 2026-02-06
+
+Structure:
+- SELL: SPY260206P00681000 (~$4.61)
+- BUY: SPY260206P00676000 (~$3.78)
+
+Financial Analysis (Per Share):
+Net Credit:    $0.83
+Max Profit:    $0.83
+Max Loss:      $4.17
+Break Even:    $680.17
+Risk/Reward:   19.90%
+P(Profit):     70.0%
+Exp. Value:    $-0.08
+IV Rank:       50%
+
+Target Quantity: 1
+
+Warnings:
+  • Low credit: 16.6% of width (min 20%)
+  •   Consider widening spread to increase credit/width ratio
+  • Short strike $681.00 is above 20-day support $672.91
+
+Context: Dry Run=True, Limit=False

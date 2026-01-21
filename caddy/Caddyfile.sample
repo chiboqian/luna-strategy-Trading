@@ -1,0 +1,9 @@
+*.luna-strategy.com {
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+    @n8n host workflow-dev.luna-strategy.com
+    handle @n8n {
+        reverse_proxy n8n:5678
+    }
+}

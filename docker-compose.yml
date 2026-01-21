@@ -1,0 +1,71 @@
+services:
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile.caddy
+    image: caddy
+    container_name: caddy
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - backend
+
+  n8n-db:
+    image: postgres:latest
+    container_name: n8n-db
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      # Maps the local './data' folder to the container's data directory
+      - ./data:/var/lib/postgresql/data  
+    networks:
+      - backend
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n
+    container_name: n8n
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - n8n_data:/home/node/.n8n
+    networks:
+      - backend
+
+  ai:
+    build: ./AI
+    container_name: ai
+    restart: unless-stopped
+    env_file:
+      - ./AI/.env
+    networks:
+      - backend
+
+  trading:
+    build: ./Trading
+    container_name: trading
+    restart: unless-stopped
+    env_file:
+      - ./Trading/.env
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  caddy_config:
+  caddy_data:
+  n8n_data:

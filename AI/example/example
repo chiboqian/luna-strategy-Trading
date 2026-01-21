@@ -1,0 +1,2 @@
+./AI/cli.py generate "provide the public stocks that will have earning in exactly 4 business days from today"  --system-instruction-file config/SI/trader.txt
+./AI/vertex_ai_cli.py generate "vsco"  --system-instruction-file config/SI/stock_review.txt

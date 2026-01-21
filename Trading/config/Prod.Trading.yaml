@@ -1,0 +1,21 @@
+# Trading Configuration
+
+trading:
+  default_dollars: 10000
+  default_stop_loss_pct: 5.0
+  default_take_profit_pct: 10.0
+  default_feed: "iex"
+  close_positions_days: 4
+
+recommendations:
+  min_score: 23
+
+
+# Market Timing Configuration
+market_timing:
+  min_minutes_remaining: 30  # Minimum minutes before market close to trade
+
+# Monitoring Configuration
+monitoring:
+  max_retries: 10
+  interval_seconds: 60

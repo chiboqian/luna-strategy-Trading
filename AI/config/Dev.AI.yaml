@@ -1,0 +1,34 @@
+# Vertex AI Configuration
+
+# Model Configuration
+model:
+  name: "gemini-3-flash-preview"
+  location: "global"
+#  location: "us-central1"
+  enable_thinking_config: true
+#  http_options:
+#    api_version: "v1beta1"
+  
+# Generation Configuration
+generation:
+  temperature: 1.0
+  top_p: 0.95
+  max_output_tokens: 65536
+
+# Thinking Configuration
+thinking_config:
+  include_thoughts: true
+  thinking_level: "high"
+
+# Tools Configuration
+tools:
+  google_search: true
+
+# System Instructions
+system_instruction_path: "config/SI/system_instruction.txt"
+
+# Helper Scripts Configuration
+review_stock:
+  system_instruction_path: "config/SI/review_stock.txt"
+
+# Safety Settings

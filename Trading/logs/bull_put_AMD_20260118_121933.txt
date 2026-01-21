@@ -1,0 +1,23 @@
+Bull Put Spread: AMD
+==============================
+Date: 2026-01-18 12:19:33
+Current Price: $231.37
+Expiration: 2026-02-06
+
+Structure:
+- SELL: AMD260206P00225000 (~$9.29)
+- BUY: AMD260206P00220000 (~$7.53)
+
+Financial Analysis (Per Share):
+Net Credit:    $1.76
+Max Profit:    $1.76
+Max Loss:      $3.24
+Break Even:    $223.24
+Risk/Reward:   54.32%
+P(Profit):     61.7%
+Exp. Value:    $0.34
+IV Rank:       50%
+
+Target Quantity: 1
+
+Context: Dry Run=True, Limit=False
