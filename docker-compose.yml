@@ -2,7 +2,6 @@ services:
   caddy:
     build:
       context: ./caddy
-      dockerfile: Dockerfile.caddy
     image: caddy
     container_name: caddy
     restart: unless-stopped
