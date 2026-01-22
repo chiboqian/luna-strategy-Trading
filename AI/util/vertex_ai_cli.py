@@ -277,6 +277,8 @@ Examples:
             print(f"\n❌ Failed to read system instruction file '{args.system_instruction_file}': {e}", file=sys.stderr)
             sys.exit(1)
     elif args.system_instruction:
+        if args.system_instruction.endswith(".txt") or Path(args.system_instruction).exists():
+            print(f"⚠️ Warning: --system-instruction argument '{args.system_instruction}' looks like a file path. Did you mean --system-instruction-file?", file=sys.stderr)
         overrides["system_instruction"] = args.system_instruction
     
     # Handle Deep Research / Thinking / Tools overrides
@@ -346,6 +348,9 @@ Examples:
             
     except Exception as e:
         print(f"\n❌ Error: {e}", file=sys.stderr)
+        if "validation error" in str(e).lower():
+            config_source = args.config if args.config else "config/AI.yaml"
+            print(f"💡 Hint: Check your configuration file '{config_source}' for invalid values.", file=sys.stderr)
         sys.exit(1)
 
 

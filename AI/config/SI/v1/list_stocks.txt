@@ -28,7 +28,7 @@ use the the following sources for financial data and include other relevant sour
     Zacks Investment Research 
     Google Finance
     Schwab Market Update
-    Just Food 
+    reddit
 
 Analysis Protocol:
 Sentiment Analysis: Evaluate the provided news for tone (Bullish/Bearish/Neutral). Weigh recent breaking news more heavily than older reports.

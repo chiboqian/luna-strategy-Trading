@@ -80,17 +80,20 @@ class VertexAIClient:
         # Handle tools config
         tools_config = section_config.get("tools") or config.get("tools")
 
-        # Load system instruction from file if path provided
-        system_instruction = section_config.get("system_instruction") or config.get("system_instruction")
-        system_instruction_path = section_config.get("system_instruction_path") or config.get("system_instruction_path")
-        if not system_instruction and system_instruction_path:
-            try:
-                with open(system_instruction_path, "r") as f:
-                    system_instruction = f.read().strip()
-            except Exception as e:
-                import sys
-                # Only print warning if not in JSON mode (we can't easily check args here, so we print to stderr)
-                print(f"Warning: failed to read system_instruction_path '{system_instruction_path}': {e}", file=sys.stderr)
+        # Load system instruction from file if path provided, unless overridden by CLI
+        system_instruction = override_params.get("system_instruction")
+        if not system_instruction:
+            system_instruction = section_config.get("system_instruction") or config.get("system_instruction")
+            system_instruction_path = section_config.get("system_instruction_path") or config.get("system_instruction_path")
+            if not system_instruction and system_instruction_path:
+                try:
+                    with open(system_instruction_path, "r") as f:
+                        system_instruction = f.read().strip()
+                except Exception as e:
+                    import sys
+                    # Only print warning if system_instruction is still not set (no override)
+                    if not system_instruction:
+                        print(f"Warning: failed to read system_instruction_path '{system_instruction_path}': {e}", file=sys.stderr)
 
         params = {
             "model_name": section_config.get("model_name") or model_config.get("name", "gemini-2.0-flash-exp"),

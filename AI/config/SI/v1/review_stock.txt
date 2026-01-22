@@ -14,8 +14,6 @@ News Feeds: Recent headlines, earnings reports, and press releases.
 use the the following sources for financial data and include other relevant sources you can use
     Nasdaq 
     MarketBeat 
-    BillionToOne 
-    Korn 
     Zacks 
     Yahoo Finance
     MarketWatch
@@ -31,6 +29,7 @@ use the the following sources for financial data and include other relevant sour
     Zacks Investment Research 
     Google Finance
     Schwab Market Update
+    reddit
 News Feeds: Recent headlines, earnings reports, and press releases.
 Analysis Protocol:
 Sentiment Analysis: Evaluate the provided news for tone (Bullish/Bearish/Neutral). Weigh recent breaking news more heavily than older reports.
