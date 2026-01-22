@@ -17,7 +17,7 @@ commands:
 
 deep_dive:
   runs: 3
-  script: "./util/review_stock.py"
+  script: "./review_stock.py"
   script_args:
     - "--system-instruction-file ./config/SI/v1/review_stock.txt"
 

@@ -52,6 +52,9 @@ def run_review(symbol: str, script_name: str, extra_args: list = None) -> str:
     if extra_args:
         cmd.extend(extra_args)
 
+    # Print the exact command being executed
+    print(f"[deep_dive] Executing: {' '.join(map(str, cmd))}", file=sys.stderr)
+
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"{script.name} failed for {symbol}: {result.stderr.strip()}" )
@@ -93,7 +96,7 @@ def main():
 
     if not args.json_output:
         print(f"Running deep dive for {len(symbols)} symbols, {args.runs} runs each...")
-    
+
     results = []
     for sym in symbols:
         for i in range(1, args.runs + 1):
@@ -124,19 +127,24 @@ def main():
                         or norm.get('conviction_score') 
                         or norm.get('confidence_score')
                     )
-                    
+
                     # Print progress to stderr so it doesn't interfere with JSON stdout
                     print(f"⏳ {sym} run {i}/{args.runs}: processed", file=sys.stderr)
-                    
+
+                    result_obj = {
+                        "symbol": symbol_val,
+                        "analysis_rating": analysis_rating,
+                        "conviction_level": conviction_level,
+                        "raw_json": parsed,
+                        "run_index": i
+                    }
+
                     if args.json_output:
-                        results.append({
-                            "symbol": symbol_val,
-                            "analysis_rating": analysis_rating,
-                            "conviction_level": conviction_level,
-                            "raw_json": parsed,
-                            "run_index": i
-                        })
-                    
+                        results.append(result_obj)
+                    else:
+                        # Print result to stdout immediately if not in JSON mode
+                        print(json.dumps(result_obj, indent=2))
+
                     # If successful, break the retry loop
                     break
 
@@ -155,7 +163,7 @@ def main():
                              # User asked specifically for "this error" (429). 
                              print(f"{sym} run {i}: error -> {e}", file=sys.stderr)
                              break
-    
+
     if args.json_output:
         print(json.dumps(results, indent=2))
 
