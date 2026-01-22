@@ -3,20 +3,24 @@
 
 commands:
   - name: "first AI query"
-    command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/list_stocks.txt --json'
+    command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/v2/list_stocks.txt --json'
     #command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/trader.txt --json'
     description: "checek with Gemini for recommendation"
   - name: "Second AI query"
-    command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/list_stocks.txt --json'
+    command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/v2/list_stocks.txt --json'
     description: "Check with Gemini again for recommendation"
   - name: "Third AI query"
-    command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/list_stocks.txt --json'
+    command: './util/vertex_ai_cli.py generate "5"  --system-instruction-file ./config/SI/v2/list_stocks.txt --json'
     description: "Check with Gemini again for recommendation"
  
 
 
 deep_dive:
   runs: 3
+  script: "./util/review_stock.py"
+  script_args:
+    - "--system-instruction-file ./config/SI/v2/review_stock.txt"
+    - "--verbose"
 
 
 # Example commands that can be added:

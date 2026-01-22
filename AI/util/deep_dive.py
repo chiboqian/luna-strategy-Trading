@@ -22,28 +22,39 @@ import yaml
 JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
 
 
-def load_default_runs():
-    """Load default runs from config/commands.yaml if present."""
+def load_deep_dive_config():
+    """Load deep_dive config from config/commands.yaml."""
     cfg = Path(__file__).parent.parent / "config" / "commands.yaml"
+    config = {"runs": 3, "script": "review_stock.py", "script_args": []}
     try:
         with open(cfg, 'r') as f:
             data = yaml.safe_load(f) or {}
             dd = data.get('deep_dive', {})
-            runs = dd.get('runs')
-            if isinstance(runs, int) and runs > 0:
-                return runs
+            if dd:
+                if 'runs' in dd:
+                    config['runs'] = int(dd['runs'])
+                if 'script' in dd:
+                    config['script'] = dd['script']
+                if 'script_args' in dd and isinstance(dd['script_args'], list):
+                    config['script_args'] = dd['script_args']
     except Exception:
         pass
-    return 3
+    return config
 
 
-def run_review(symbol: str) -> str:
+def run_review(symbol: str, script_name: str, extra_args: list = None) -> str:
     """Run review_stock.py for a symbol and return stdout text."""
-    script = Path(__file__).parent / "review_stock.py"
-    cmd = [str(script), symbol]
+    script = Path(script_name)
+    if not script.is_absolute():
+        script = Path(__file__).parent / script
+
+    cmd = [sys.executable, str(script), symbol]
+    if extra_args:
+        cmd.extend(extra_args)
+
     result = subprocess.run(cmd, check=False, capture_output=True, text=True)
     if result.returncode != 0:
-        raise RuntimeError(f"review_stock.py failed for {symbol}: {result.stderr.strip()}" )
+        raise RuntimeError(f"{script.name} failed for {symbol}: {result.stderr.strip()}" )
     return result.stdout
 
 
@@ -60,14 +71,19 @@ def extract_json(text: str) -> dict:
 
 
 def main():
+    config = load_deep_dive_config()
     parser = argparse.ArgumentParser(
         description='Run deep dive analysis for all symbols',
         formatter_class=argparse.ArgumentDefaultsHelpFormatter
     )
-    parser.add_argument('--runs', type=int, default=load_default_runs(), help='Number of runs per symbol')
+    parser.add_argument('--runs', type=int, default=config['runs'], help='Number of runs per symbol')
+    parser.add_argument('--script', default=config['script'], help='Script to run')
     parser.add_argument('--symbols', nargs='+', required=True, help='List of symbols to process')
     parser.add_argument('--json-output', action='store_true', help='Output results as JSON to stdout')
-    args = parser.parse_args()
+    args, unknown_args = parser.parse_known_args()
+
+    # Combine config args and CLI unknown args
+    extra_args = config['script_args'] + unknown_args
 
     if args.runs <= 0:
         print("Error: --runs must be >= 1", file=sys.stderr)
@@ -83,7 +99,7 @@ def main():
         for i in range(1, args.runs + 1):
             for attempt in range(3):
                 try:
-                    out = run_review(sym)
+                    out = run_review(sym, args.script, extra_args)
                     parsed, raw = extract_json(out)
                     # Normalize keys: lowercase and convert spaces/hyphens to underscores
                     norm = {}

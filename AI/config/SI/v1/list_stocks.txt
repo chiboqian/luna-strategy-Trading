@@ -13,8 +13,6 @@ News Feeds: Recent headlines, earnings reports, and press releases.
 use the the following sources for financial data and include other relevant sources you can use
     Nasdaq 
     MarketBeat 
-    BillionToOne 
-    Korn 
     Zacks 
     Yahoo Finance
     MarketWatch
@@ -68,3 +66,4 @@ provide a recommendation for any stock with a strong buy or sell recommendations
 cite your sources
 I need at least 5 buy or sell recommendations 
 repeat the recommendation in a json format with only action and ticket so that it can be fed into a python program
+
