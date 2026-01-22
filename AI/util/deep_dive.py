@@ -18,6 +18,7 @@ import json
 import time
 from pathlib import Path
 import yaml
+import shlex
 
 JSON_BLOCK_RE = re.compile(r"\{[\s\S]*\}")
 
@@ -36,7 +37,8 @@ def load_deep_dive_config():
                 if 'script' in dd:
                     config['script'] = dd['script']
                 if 'script_args' in dd and isinstance(dd['script_args'], list):
-                    config['script_args'] = dd['script_args']
+                    for arg in dd['script_args']:
+                        config['script_args'].extend(shlex.split(str(arg)))
     except Exception:
         pass
     return config

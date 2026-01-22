@@ -14,6 +14,7 @@ import requests
 import boto3
 import yaml
 import subprocess
+import shlex
 from pathlib import Path
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -368,6 +369,19 @@ def main():
                     if deep_dive_script.exists():
                         cmd_args = [sys.executable, str(deep_dive_script), "--symbols"] + final_symbols + ["--json-output"]
                         
+                        # Pass deep_dive config from loaded yaml
+                        dd_config = cmd_data.get('deep_dive', {})
+                        
+                        if 'runs' in dd_config:
+                            cmd_args.extend(["--runs", str(dd_config['runs'])])
+                            
+                        if 'script' in dd_config:
+                            cmd_args.extend(["--script", dd_config['script']])
+                            
+                        if 'script_args' in dd_config and isinstance(dd_config['script_args'], list):
+                            for arg in dd_config['script_args']:
+                                cmd_args.extend(shlex.split(str(arg)))
+
                         # Execute deep dive
                         # We stream stderr to console for progress, but capture stdout for JSON data
                         result = subprocess.run(
