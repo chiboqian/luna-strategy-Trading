@@ -11,7 +11,7 @@ model:
   
 # Generation Configuration
 generation:
-  temperature: 1.0
+  temperature: 1.0ßß
   top_p: 0.95
   max_output_tokens: 65536
 

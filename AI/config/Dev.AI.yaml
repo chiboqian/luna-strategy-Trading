@@ -3,15 +3,15 @@
 # Model Configuration
 model:
   name: "gemini-3-flash-preview"
-  location: "global"
-#  location: "us-central1"
+#  location: "global"
+  location: "us-central1"
   enable_thinking_config: true
-#  http_options:
-#    api_version: "v1beta1"
+  http_options:
+    api_version: "v1beta1"
   
 # Generation Configuration
 generation:
-  temperature: 1.0
+  temperature: 1.0ßß
   top_p: 0.95
   max_output_tokens: 65536
 
@@ -31,4 +31,17 @@ system_instruction_path: "config/SI/system_instruction.txt"
 review_stock:
   system_instruction_path: "config/SI/review_stock.txt"
 
-# Safety Settings
+safety_settings:
+  - category: HARM_CATEGORY_HARASSMENT
+    threshold: BLOCK_NONE
+  - category: HARM_CATEGORY_HATE_SPEECH
+    threshold: BLOCK_NONE
+  - category: HARM_CATEGORY_SEXUALLY_EXPLICIT
+    threshold: BLOCK_NONE
+  - category: HARM_CATEGORY_DANGEROUS_CONTENT
+    threshold: BLOCK_NONE
+  - category: HARM_CATEGORY_CIVIC_INTEGRITY # Prevents blocking news analysis
+    threshold: BLOCK_NONE
+
+
+

@@ -15,13 +15,17 @@ import yaml
 from pathlib import Path
 
 
-def get_system_instruction_path(cli_path=None):
+def get_system_instruction_path(cli_path=None, config_file=None):
     """Get system instruction path from CLI arg or config file."""
     if cli_path:
         return Path(cli_path)
     
     # Try to load from config
-    config_path = Path(__file__).parent.parent / "config" / "AI.yaml"
+    if config_file:
+        config_path = Path(config_file)
+    else:
+        config_path = Path(__file__).parent.parent / "config" / "AI.yaml"
+
     try:
         with open(config_path, 'r') as f:
             config = yaml.safe_load(f)
@@ -49,6 +53,11 @@ def main():
         '--config',
         help='Path to AI config file (default: config/AI.yaml)'
     )
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Print configuration variables'
+    )
     args = parser.parse_args()
     
     # Get input from either positional or flag
@@ -59,7 +68,7 @@ def main():
         sys.exit(1)
     
     # Resolve system instruction file path
-    si_file = get_system_instruction_path(args.system_instruction_file)
+    si_file = get_system_instruction_path(args.system_instruction_file, args.config)
     
     # Make path absolute if relative
     if not si_file.is_absolute():
@@ -81,6 +90,16 @@ def main():
         user_input
     ]
     
+    if args.config:
+        cmd.extend(["--config", args.config])
+
+    if args.verbose:
+        cmd.append("--verbose")
+        print(f"Configuration:", file=sys.stderr)
+        print(f"  System Instruction File: {si_file}", file=sys.stderr)
+        print(f"  Config File: {args.config or 'config/AI.yaml (default)'}", file=sys.stderr)
+        print(f"  Input: {user_input}", file=sys.stderr)
+
     # Execute
     try:
         result = subprocess.run(cmd, check=False)
