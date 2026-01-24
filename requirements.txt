@@ -1,0 +1,12 @@
+alpaca-py
+boto3
+google-cloud-aiplatform
+lxml
+numpy
+pandas
+pyarrow
+python-dotenv
+PyYAML
+requests
+scipy
+yfinance
