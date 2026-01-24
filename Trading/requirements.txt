@@ -14,3 +14,6 @@ scipy
 yfinance
 alpaca-py
 tabulate
+pandas 
+pyarrow 
+fastparquet
