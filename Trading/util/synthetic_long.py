@@ -24,6 +24,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
 
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 # Add parent directory to path to import Trading modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
@@ -35,6 +40,161 @@ except ImportError:
     except ImportError:
         print("Error: Could not import AlpacaClient. Check python path.", file=sys.stderr)
         sys.exit(1)
+
+class MockOptionClient:
+    """Mock client to simulate AlpacaClient using historical Parquet data."""
+    def __init__(self, parquet_file: str, target_date: datetime, save_order_file: str = None):
+        if pd is None:
+            raise ImportError("pandas is required for MockOptionClient")
+        
+        print(f"Loading historical data from {parquet_file}...")
+        self.df = pd.read_parquet(parquet_file)
+        self.target_date = target_date
+        self.save_order_file = save_order_file
+        
+        # Filter by date if 'date' or 'quote_date' column exists
+        date_col = None
+        for col in ['date', 'quote_date', 'timestamp', 'time']:
+            if col in self.df.columns:
+                date_col = col
+                break
+        
+        if date_col:
+            # Ensure date column matches target_date (string or datetime comparison)
+            # Assuming format YYYY-MM-DD in target_date
+            target_str = target_date.strftime('%Y-%m-%d')
+            # Try string conversion for filtering
+            mask = self.df[date_col].astype(str).str.startswith(target_str)
+            self.df = self.df[mask].copy()
+            print(f"Filtered data for {target_str}: {len(self.df)} rows")
+        
+        # Ensure required columns exist or map them
+        self.col_map = {
+            'symbol': 'symbol', # Option symbol
+            'root': 'root',     # Underlying symbol
+            'strike': 'strike',
+            'expiration': 'expiration',
+            'type': 'type',
+            'bid': 'bid',
+            'ask': 'ask',
+            'underlying': 'underlying_last' # Common name, fallback checked later
+        }
+        
+        # Adjust map based on actual columns
+        cols = self.df.columns
+        if 'contract_id' in cols:
+            self.col_map['symbol'] = 'contract_id'
+            if 'symbol' in cols:
+                self.col_map['root'] = 'symbol'
+        
+        if 'underlying_price' in cols: self.col_map['underlying'] = 'underlying_price'
+        elif 'underlying_last' in cols: self.col_map['underlying'] = 'underlying_last'
+        elif 'spot' in cols: self.col_map['underlying'] = 'spot'
+        
+        if 'strike_price' in cols: self.col_map['strike'] = 'strike_price'
+        if 'expiration_date' in cols: self.col_map['expiration'] = 'expiration_date'
+        if 'option_type' in cols: self.col_map['type'] = 'option_type'
+
+    def get_stock_latest_trade(self, symbol: str):
+        # Try to find underlying price from option data
+        # Look for rows matching the root symbol
+        
+        # 1. Try explicit column
+        if self.col_map['underlying'] in self.df.columns:
+            if self.col_map['root'] in self.df.columns:
+                subset = self.df[self.df[self.col_map['root']] == symbol]
+                if not subset.empty:
+                    price = subset[self.col_map['underlying']].iloc[0]
+                    return {'p': float(price)}
+            
+            price = self.df[self.col_map['underlying']].iloc[0]
+            return {'p': float(price)}
+            
+        # 2. Infer from Deep ITM Call (Delta ~ 1)
+        # Price = Strike + OptionPrice
+        if self.col_map['root'] in self.df.columns:
+            subset = self.df[self.df[self.col_map['root']] == symbol]
+        else:
+            subset = self.df
+            
+        if not subset.empty and 'delta' in subset.columns and 'mark' in subset.columns:
+            # Find call with delta > 0.95
+            calls = subset[(subset[self.col_map['type']] == 'call') & (subset['delta'] > 0.95)]
+            if not calls.empty:
+                best = calls.sort_values('delta', ascending=False).iloc[0]
+                strike = float(best[self.col_map['strike']])
+                mark = float(best['mark'])
+                inferred_price = strike + mark
+                print(f"Inferred underlying price for {symbol}: {inferred_price:.2f} (from ITM Call)")
+                return {'p': inferred_price}
+                
+        return {'p': 0.0}
+
+    def get_stock_snapshot(self, symbol: str):
+        trade = self.get_stock_latest_trade(symbol)
+        return {'latestTrade': trade, 'dailyBar': {'c': trade['p']}}
+
+    def get_option_contracts(self, underlying_symbol, expiration_date_gte, expiration_date_lte, strike_price_gte, strike_price_lte, limit=None, status=None, type=None):
+        # Filter dataframe
+        mask = pd.Series(True, index=self.df.index)
+        
+        # 0. Root Symbol
+        if self.col_map['root'] in self.df.columns:
+            mask &= (self.df[self.col_map['root']] == underlying_symbol)
+            
+        # 1. Expiration
+        mask &= (self.df[self.col_map['expiration']] >= expiration_date_gte) & (self.df[self.col_map['expiration']] <= expiration_date_lte)
+        # 2. Strike
+        mask &= (self.df[self.col_map['strike']] >= strike_price_gte) & (self.df[self.col_map['strike']] <= strike_price_lte)
+        
+        filtered = self.df[mask]
+        contracts = []
+        for _, row in filtered.iterrows():
+            contracts.append({
+                'symbol': row[self.col_map['symbol']],
+                'expiration_date': str(row[self.col_map['expiration']]),
+                'strike_price': row[self.col_map['strike']],
+                'type': row[self.col_map['type']],
+                'open_interest': row.get('open_interest', 0)
+            })
+        return contracts
+
+    def get_option_snapshot(self, symbol_or_symbols):
+        symbols = symbol_or_symbols.split(',')
+        snapshots = {}
+        for sym in symbols:
+            row = self.df[self.df[self.col_map['symbol']] == sym]
+            if not row.empty:
+                r = row.iloc[0]
+                snapshots[sym] = {
+                    'latestQuote': {'ap': r.get(self.col_map['ask'], 0), 'bp': r.get(self.col_map['bid'], 0)},
+                    'latestTrade': {'p': (r.get(self.col_map['ask'], 0) + r.get(self.col_map['bid'], 0)) / 2}, # Mid as trade
+                    'greeks': {
+                        'delta': r.get('delta'),
+                        'gamma': r.get('gamma'),
+                        'theta': r.get('theta'),
+                        'vega': r.get('vega'),
+                        'implied_volatility': r.get('implied_volatility')
+                    }
+                }
+        
+        if len(symbols) == 1:
+            return snapshots[symbols[0]]
+        return snapshots
+
+    def place_option_limit_order(self, **kwargs):
+        return self._mock_order(**kwargs)
+
+    def place_option_market_order(self, **kwargs):
+        return self._mock_order(**kwargs)
+
+    def _mock_order(self, **kwargs):
+        order = {'id': 'mock_order_id', 'status': 'filled', 'filled_at': self.target_date.isoformat(), **kwargs}
+        if self.save_order_file:
+            with open(self.save_order_file, 'w') as f:
+                json.dump(order, f, indent=2, default=str)
+            print(f"Mock order saved to {self.save_order_file}")
+        return order
 
 def get_closest_contract(contracts: List[Dict], target_strike: float, option_type: str) -> Optional[Dict]:
     """Finds the contract with strike price closest to target."""
@@ -71,7 +231,12 @@ def main():
     parser.add_argument("--window", type=int, default=default_window, help=f"Search window (days) after min days, default {default_window}")
     parser.add_argument("--protection-pct", type=float, default=default_prot_pct, help=f"Protective Put distance from spot (%%), default {default_prot_pct}")
     parser.add_argument("--amount", type=float, default=None, help=f"Notional dollar amount to invest (default ${default_amount})")
+    parser.add_argument("--limit-order", action="store_true", help="Use limit order at mid-price instead of market order")
+    parser.add_argument("--max-spread", type=float, default=5.0, help="Max bid/ask spread percent (default: 5.0)")
     parser.add_argument("--dry-run", action="store_true", help="Do not execute, just show plan")
+    parser.add_argument("--parquet", type=str, help="Path to historical parquet file (mock mode)")
+    parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
+    parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     
     args = parser.parse_args()
@@ -91,7 +256,17 @@ def main():
     else:
         args.quantity = 1 # Fallback default
 
-    client = AlpacaClient()
+    # Determine Reference Date
+    if args.date:
+        reference_date = datetime.strptime(args.date, "%Y-%m-%d")
+    else:
+        reference_date = datetime.now()
+
+    if args.parquet:
+        client = MockOptionClient(args.parquet, reference_date, args.save_order)
+    else:
+        client = AlpacaClient()
+
     symbol = args.symbol.upper()
     
     # 1. Get Spot Price
@@ -135,9 +310,9 @@ def main():
 
     # 3. Find Options
     # Look for contracts expiring after roughly args.days
-    start_date = (datetime.now() + timedelta(days=args.days)).strftime("%Y-%m-%d")
+    start_date = (reference_date + timedelta(days=args.days)).strftime("%Y-%m-%d")
     # Window of opportunity to find liquid expiration
-    end_date = (datetime.now() + timedelta(days=args.days + args.window)).strftime("%Y-%m-%d")
+    end_date = (reference_date + timedelta(days=args.days + args.window)).strftime("%Y-%m-%d")
 
     if not args.json:
         print(f"Searching for contracts expiring >= {start_date}...")
@@ -193,7 +368,7 @@ def main():
     
     # Calculate days out roughly
     try:
-        d_out = (datetime.strptime(selected_exp, "%Y-%m-%d") - datetime.now()).days
+        d_out = (datetime.strptime(selected_exp, "%Y-%m-%d") - reference_date).days
     except:
         d_out = "?"
 
@@ -292,10 +467,13 @@ def main():
     # --- METRICS CALCULATION ---
     metrics = {
         "net_cost": 0.0,
+        "net_mid_cost": 0.0,
         "max_loss": 0.0,
         "break_even": 0.0,
-        "contracts_data": {}
+        "contracts_data": {},
+        "max_leg_spread": 0.0
     }
+    warnings = []
     
     try:
         leg_symbols = [l['symbol'] for l in legs]
@@ -317,6 +495,7 @@ def main():
                      snapshots = {joined_symbols: snapshots}
 
             total_premium = 0.0
+            total_mid_premium = 0.0
             net_delta = 0.0
             
             for leg in legs:
@@ -331,14 +510,24 @@ def main():
                 ask = float(quote.get('ap') or 0)
                 bid = float(quote.get('bp') or 0)
                 last = float(snap.get('latestTrade', {}).get('p') or 0)
+                mid = (ask + bid) / 2 if (ask > 0 and bid > 0) else last
+                
+                if ask > 0 and bid > 0:
+                    spread_pct = (ask - bid) / mid if mid > 0 else 0
+                    if spread_pct > metrics['max_leg_spread']:
+                        metrics['max_leg_spread'] = spread_pct
+                    if spread_pct > (args.max_spread / 100.0):
+                        warnings.append(f"Wide spread on {sym}: {spread_pct:.1%} > {args.max_spread}%")
                 
                 price = 0.0
                 if 'buy' in side:
                     price = ask if ask > 0 else last
                     total_premium += price # Debit
+                    total_mid_premium += mid
                 else:
                     price = bid if bid > 0 else last
                     total_premium -= price # Credit (reduces cost)
+                    total_mid_premium -= mid
                 
                 leg['estimated_price'] = price
                 
@@ -350,6 +539,7 @@ def main():
                     net_delta += d
             
             metrics['net_cost'] = total_premium
+            metrics['net_mid_cost'] = total_mid_premium
             metrics['net_delta'] = net_delta
             
             # Max Loss = (CallStrike - ProtStrike) + NetPremium
@@ -383,11 +573,23 @@ def main():
 
             if not args.json:
                 print("\n--- Financial Analysis (Per Share) ---")
-                print(f"Est. Net Premium: ${metrics['net_cost']:.2f}")
+                print(f"Est. Net Premium: ${metrics['net_cost']:.2f} (Natural)")
+                print(f"Mid Net Premium:  ${metrics['net_mid_cost']:.2f}")
                 print(f"Max Loss Risk:    ${metrics['max_loss']:.2f} (Floor @ ${prot_strike:.2f})")
+                max_loss_ratio = metrics['max_loss'] / current_price if current_price > 0 else 0
+                print(f"Max Loss/Price:   {max_loss_ratio:.1%}")
+                if metrics['net_cost'] > 0:
+                    loss_prem_ratio = metrics['max_loss'] / metrics['net_cost']
+                    print(f"Max Loss/Prem:    {loss_prem_ratio:.2f}x")
                 print(f"Break Even:       ${metrics['break_even']:.2f}")
                 print(f"Position Delta:   {metrics['net_delta']:.2f}")
                 print(f"Cap Efficiency:   Floor protection cost = ${(metrics['net_cost']):.2f} vs Stock Price ${current_price:.2f}")
+                print(f"Max Leg Spread:   {metrics['max_leg_spread']:.2%}")
+
+            if warnings and not args.json:
+                print("\n⚠️  Liquidity Warnings:")
+                for w in warnings:
+                    print(f"  - {w}")
 
     except Exception as e:
         if not args.json:
@@ -398,20 +600,38 @@ def main():
     email_lines = []
     email_lines.append(f"Synthetic Long Strategy: {symbol}")
     email_lines.append("=" * 30)
-    email_lines.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    email_lines.append(f"Date: {reference_date.strftime('%Y-%m-%d %H:%M:%S')}")
     if current_price > 0:
         email_lines.append(f"Current Price: ${current_price:.2f}")
     email_lines.append(f"Expiration: {selected_exp}")
     email_lines.append("")
     email_lines.append("Structure:")
     for leg in legs:
-        price_str = f"~${leg.get('estimated_price', 0):.2f}"
+        price = leg.get('estimated_price', 0)
+        sym = leg['symbol']
+        snap = metrics.get('contracts_data', {}).get(sym, {})
+        quote = snap.get('latestQuote', {})
+        ask = float(quote.get('ap') or 0)
+        bid = float(quote.get('bp') or 0)
+        last = float(snap.get('latestTrade', {}).get('p') or 0)
+        mid = (ask + bid) / 2 if (ask > 0 and bid > 0) else last
+        spread = ask - bid if (ask > 0 and bid > 0) else 0
+        spread_pct = (spread / mid) if (mid > 0) else 0
+        price_str = f"~${price:.2f} (Bid: ${bid:.2f}, Ask: ${ask:.2f}, Mid: ${mid:.2f}, Spread: ${spread:.2f}, Spread%: {spread_pct:.2%})"
         email_lines.append(f"- {leg.get('position_intent', leg.get('side'))}: {leg['symbol']} ({price_str})")
+        # Print to console as well
+        if not args.json:
+            print(f"  {leg.get('position_intent', leg.get('side'))}: {leg['symbol']}\n    Price: ${price:.2f}\n    Bid:   ${bid:.2f}\n    Ask:   ${ask:.2f}\n    Mid:   ${mid:.2f}\n    Spread: ${spread:.2f} ({spread_pct:.2%})")
     email_lines.append("")
     email_lines.append("Financial Analysis (Per Share):")
     email_lines.append(f"Est. Net Premium: ${metrics.get('net_cost', 0):.2f}")
     if metrics.get('max_loss'):
         email_lines.append(f"Max Loss Risk:    ${metrics.get('max_loss', 0):.2f}")
+        max_loss_ratio = metrics['max_loss'] / current_price if current_price > 0 else 0
+        email_lines.append(f"Max Loss/Price:   {max_loss_ratio:.1%}")
+        if metrics.get('net_cost', 0) > 0:
+             loss_prem_ratio = metrics['max_loss'] / metrics['net_cost']
+             email_lines.append(f"Max Loss/Prem:    {loss_prem_ratio:.2f}x")
     if metrics.get('break_even'):
         email_lines.append(f"Break Even:       ${metrics.get('break_even', 0):.2f}")
     if metrics.get('net_delta'):
@@ -426,42 +646,74 @@ def main():
     email_text_base = "\n".join(email_lines)
 
     if args.dry_run:
+        # Add per-leg bid/ask/mid/spread info to each leg in JSON output
+        detailed_legs = []
+        for leg in legs:
+            sym = leg['symbol']
+            snap = metrics.get('contracts_data', {}).get(sym, {})
+            quote = snap.get('latestQuote', {})
+            ask = float(quote.get('ap') or 0)
+            bid = float(quote.get('bp') or 0)
+            last = float(snap.get('latestTrade', {}).get('p') or 0)
+            mid = (ask + bid) / 2 if (ask > 0 and bid > 0) else last
+            spread = ask - bid if (ask > 0 and bid > 0) else 0
+            spread_pct = (spread / mid) if (mid > 0) else 0
+            detailed_leg = dict(leg)
+            detailed_leg.update({
+                "bid": bid,
+                "ask": ask,
+                "mid": mid,
+                "spread": spread,
+                "spread_pct": spread_pct
+            })
+            detailed_legs.append(detailed_leg)
         result = {
             "status": "dry_run",
             "scan": {
                 "current_price": current_price,
                 "expiration": selected_exp,
             },
-            "legs": legs,
+            "legs": detailed_legs,
             "metrics": metrics,
-            "email_text": email_text_base + "\n\nStatus: Dry Run (No Order Submitted)"
+            "email_text": email_text_base + "\n\nStatus: Dry Run (No Order Submitted)",
+            "warnings": warnings
         }
         if args.json:
             print(json.dumps(result, indent=2))
         else:
-             print("\nDry Run Complete. Order not submitted.")
+            print("\nDry Run Complete. Order not submitted.")
         return
 
     # Execute
     if not args.json:
-        print(f"\nSubmitting order for {args.quantity}x structures...")
+        order_type = "LIMIT" if args.limit_order else "MARKET"
+        print(f"\nSubmitting {order_type} order for {args.quantity}x structures...")
         
     try:
-        # Determine order class: 'mleg' for multi-leg strategies
-        # If legs count is 1, it could be simple, but let's try strict structure
-        # Actually, for 1 leg (e.g. optimized), we should probably use simple or mleg with 1 leg.
-        # Assuming mleg works generally for this strategy context.
-        response = client.place_option_market_order(
-            legs=legs,
-            quantity=args.quantity,
-            time_in_force='day',
-            order_class='mleg'
-        )
+        if args.limit_order:
+            limit_price = round(metrics['net_mid_cost'], 2)
+            # Pass entry_cash_flow for mock orders (Debit = negative cash flow)
+            entry_cash_flow = -limit_price
+            kwargs = {'legs': legs, 'quantity': args.quantity, 'limit_price': limit_price, 'time_in_force': 'day', 'order_class': 'mleg'}
+            if isinstance(client, MockOptionClient):
+                kwargs['entry_cash_flow'] = entry_cash_flow
+            
+            response = client.place_option_limit_order(**kwargs)
+        else:
+            # Determine order class: 'mleg' for multi-leg strategies
+            # Pass entry_cash_flow for mock orders (Debit = negative cash flow)
+            entry_cash_flow = -metrics['net_cost']
+            kwargs = {'legs': legs, 'quantity': args.quantity, 'time_in_force': 'day', 'order_class': 'mleg'}
+            if isinstance(client, MockOptionClient):
+                kwargs['entry_cash_flow'] = entry_cash_flow
+
+            response = client.place_option_market_order(**kwargs)
         
         result = {
             "status": "executed",
             "order": response,
-            "email_text": email_text_base + f"\n\nStatus: Order Submitted\nOrder ID: {response.get('id')}\nAlpaca Order Status: {response.get('status')}"
+            "email_text": email_text_base + f"\n\nStatus: Order Submitted\nOrder ID: {response.get('id')}\nAlpaca Order Status: {response.get('status')}",
+            "warnings": warnings
         }
         
         if args.json:

@@ -435,7 +435,7 @@ class OptionStrategyScanner:
                 
         return pd.DataFrame(valid_data)
 
-    def analyze_momentum(self, symbol: str, verbose: bool = False) -> Tuple[bool, float]:
+    def analyze_momentum(self, symbol: str, verbose: bool = False) -> Tuple[bool, float, float]:
         """
         Calculates RSI, Moving Averages, MACD, ADX, and Volume.
         Returns (Pass/Fail, RSI Value, HV20).
@@ -459,7 +459,7 @@ class OptionStrategyScanner:
                 
             if len(bars) < 200:
                 if verbose: print(f"  [Detail] Not enough history: {len(bars)} bars")
-                return False, 0.0
+                return False, 0.0, 0.0
 
             # Calculate SMA
             bars['sma50'] = bars['close'].rolling(window=50).mean()
@@ -781,7 +781,7 @@ class OptionStrategyScanner:
         target_dte_max = self.scan_opts.get('target_dte_max', 60)
         iv_max_threshold = self.scan_opts.get('iv_max_threshold', 0.45)
         skew_tolerance = self.scan_opts.get('skew_tolerance', 0.04)
-        max_opt_spread = self.scan_opts.get('max_option_spread_pct', 0.10)
+        max_opt_spread = self.scan_opts.get('max_option_spread_pct', 0.05)
         max_iv_hv_ratio = self.scan_opts.get('iv_hv_ratio_threshold', 1.25)
         min_oi = self.scan_opts.get('min_open_interest', 50)
 
@@ -805,10 +805,16 @@ class OptionStrategyScanner:
             # We must iterate to find a suitable expiration cycle (e.g., Monthly)
             chain_response = self.option_client.get_option_chain(req)
             
+            if not chain_response:
+                if verbose: print(f"  [Detail] Alpaca returned 0 contracts for query (Check strike range/dates).")
+                return None
+            
             # Parse into DataFrame for easier manipulation
             # Structure: symbol, type, strike, expiration, latest_quote (bid/ask)
             
             contracts = []
+            skipped_counts = {"parse": 0, "no_quote": 0, "zero_price": 0, "wide_spread": 0}
+            
             for contract_sym, data in chain_response.items():
                 # We need snapshots to get pricing. The chain endpoint implies snapshots
                 # if configured, or we must fetch them separately.
@@ -818,14 +824,17 @@ class OptionStrategyScanner:
                 # Must parse from symbol key
                 parsed = self._parse_option_symbol(contract_sym)
                 if not parsed:
+                    skipped_counts["parse"] += 1
                     continue
 
                 quote = data.latest_quote
                 if not quote or quote.bid_price is None or quote.ask_price is None:
+                    skipped_counts["no_quote"] += 1
                     continue
                     
                 mid_price = (quote.bid_price + quote.ask_price) / 2
                 if mid_price == 0:
+                    skipped_counts["zero_price"] += 1
                     continue
                 
                 # SPREAD CHECK
@@ -833,6 +842,7 @@ class OptionStrategyScanner:
                 spread_pct = spread / mid_price
                 if spread_pct > max_opt_spread:
                      # Skip illiquid options
+                     skipped_counts["wide_spread"] += 1
                      continue
 
                 # Check Open Interest (if available) - Fallback to 0
@@ -853,7 +863,9 @@ class OptionStrategyScanner:
                 
             df = pd.DataFrame(contracts)
             if df.empty:
-                if verbose: print(f"  [Detail] No valid option contracts found (Check Spreads < {max_opt_spread:.1%}?).")
+                if verbose: 
+                    print(f"  [Detail] No valid option contracts found.")
+                    print(f"    Stats: Total={len(chain_response)}, Skipped: Spread={skipped_counts['wide_spread']} (>{max_opt_spread:.1%}), NoQuote={skipped_counts['no_quote']}, ZeroP={skipped_counts['zero_price']}")
                 return None
             
             # Filter by Open Interest (soft filter, maybe only for chosen strikes?)
@@ -1149,6 +1161,7 @@ class OptionStrategyScanner:
                 print(f"  [Detail] Net Vega: ${net_vega:.2f} (per 1% IV change)")
                 print(f"  [Detail] Put-Call Parity Error: {parity_error_pct:.2f}% (Should be < 1%)")
                 print(f"  [Detail] Margin Estimate: ${margin_estimate:.2f}/share")
+                print(f"  [Detail] Max Leg Spread: {max_spread_val:.2%}")
                 print(f"  [Detail] Break-even: ${breakeven:.2f} ({breakeven_pct:+.2f}% from spot)")
                 print(f"  [Detail] Capital Efficiency: {capital_efficiency:.1f}% less capital vs stock")
                 print(f"  [Detail] Max Loss (20% drop): ${max_loss_scenario:.2f} (per contract)")
@@ -1222,6 +1235,7 @@ class OptionStrategyScanner:
                     'vega': round(net_vega, 2),
                     'breakeven': round(breakeven, 2),
                     'margin_est': round(margin_estimate, 2),
+                    'max_spread': round(max_spread_val * 100, 2),
                     'cap_eff_pct': round(capital_efficiency, 1),
                     'max_loss': round(max_loss_scenario, 2),
                     'risk_reward': round(risk_reward, 2),
@@ -1323,21 +1337,33 @@ class OptionStrategyScanner:
         
         print(f"{'='*60}\n")
 
-    async def run(self, strategy: Optional[str] = None, limit: Optional[int] = None, symbol: Optional[str] = None, verbose: bool = False):
+    async def run(self, strategy: Optional[str] = None, limit: Optional[int] = None, symbol: Optional[Union[str, List[str]]] = None, verbose: bool = False, max_spread: Optional[float] = None):
         if strategy is None:
             strategy = self.config.get('option_scan', {}).get('default_strategy', 'synthetic_long')
             
+        if max_spread is not None:
+            self.scan_opts['max_option_spread_pct'] = max_spread / 100.0
+            print(f"Overriding Max Option Spread: {max_spread}%")
+
         print(f"--- Starting Scanner (Strategy: {strategy}) ---")
         
-        single_mode = symbol is not None
-        # Enable verbose logging if single mode OR explicit verbose flag
-        is_verbose = single_mode or verbose
+        # Handle symbol input (str or list)
+        target_symbols = []
+        if symbol:
+            if isinstance(symbol, str):
+                target_symbols = [symbol.upper()]
+            else:
+                target_symbols = [s.upper() for s in symbol]
         
-        if single_mode:
-            print(f"--- Single Stock Scan Mode: {symbol} ---")
-            # For single mode, we bypass the bulk logic but still need checks
+        explicit_mode = len(target_symbols) > 0
+        # Enable verbose logging if explicit mode OR explicit verbose flag
+        is_verbose = explicit_mode or verbose
+        
+        if explicit_mode:
+            print(f"--- Explicit Scan Mode: {', '.join(target_symbols)} ---")
+            # For explicit mode, we bypass the bulk logic but still need checks
             # We assume it's optionable or let it fail downstream
-            candidates = [symbol.upper()]
+            candidates = target_symbols
         else:
             # Step 1: Universe
             candidates = await self.get_universe(limit_override=limit)
@@ -1479,7 +1505,7 @@ class OptionStrategyScanner:
             print(df_failed[display_cols_failed].to_markdown(index=False))
             
             # Save failed results to CSV (only for batch mode)
-            if not single_mode:
+            if not explicit_mode:
                 df_failed.to_csv("synthetic_long_failed.csv", index=False)
                 print(f"\nFailed candidates saved to synthetic_long_failed.csv")
         
@@ -1505,7 +1531,7 @@ class OptionStrategyScanner:
             
             # Select columns for display (exclude some for readability)
             display_cols = ['symbol', 'sector', 'price', 'dte', 'atm_iv', 'skew', 
-                           'syn_cost', 'net_delta', 'cap_eff_pct', 'risk_reward', 'score']
+                           'syn_cost', 'net_delta', 'cap_eff_pct', 'risk_reward', 'max_spread', 'score']
             display_cols = [c for c in display_cols if c in df_results.columns]
             
             print(df_results[display_cols].to_markdown(index=False))
@@ -1530,9 +1556,10 @@ if __name__ == "__main__":
                         choices=["synthetic_long"],
                         help="Scan strategy to execute (default: read from config)")
     parser.add_argument("--limit", type=int, help="Limit the number of stocks to scan (overrides config)")
-    parser.add_argument("--symbol", type=str, help="Scan a single stock symbol and show detailed metrics")
+    parser.add_argument("--symbol", type=str, nargs='+', help="Scan specific stock symbol(s) and show detailed metrics")
     parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--max-spread", type=float, default=5.0, help="Max bid/ask spread percent (default: 5.0)")
     args = parser.parse_args()
 
     scanner = OptionStrategyScanner()
-    asyncio.run(scanner.run(strategy=args.strategy, limit=args.limit, symbol=args.symbol, verbose=args.verbose))
+    asyncio.run(scanner.run(strategy=args.strategy, limit=args.limit, symbol=args.symbol, verbose=args.verbose, max_spread=args.max_spread))

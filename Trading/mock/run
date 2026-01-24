@@ -1,0 +1,2 @@
+./util/synthetic_long.py SPY   --parquet data/spy.options --date 2023-11-13   --save-order data/mock_order.json
+./util/close_mock_order.py   --parquet data/spy.options --order data/mock_order.json --date 2023-11-17 --output data/result_pnl.json

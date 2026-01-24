@@ -50,6 +50,11 @@ try:
 except ImportError:
     HAS_SCIPY = False
 
+try:
+    import pandas as pd
+except ImportError:
+    pd = None
+
 # Add parent directory to path to import Trading modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
@@ -62,6 +67,160 @@ except ImportError:
         print("Error: Could not import AlpacaClient. Check python path.", file=sys.stderr)
         sys.exit(1)
 
+class MockOptionClient:
+    """Mock client to simulate AlpacaClient using historical Parquet data."""
+    def __init__(self, parquet_file: str, target_date: datetime, save_order_file: str = None):
+        if pd is None:
+            raise ImportError("pandas is required for MockOptionClient")
+        
+        print(f"Loading historical data from {parquet_file}...")
+        self.df = pd.read_parquet(parquet_file)
+        self.target_date = target_date
+        self.save_order_file = save_order_file
+        
+        # Filter by date if 'date' or 'quote_date' column exists
+        date_col = None
+        for col in ['date', 'quote_date', 'timestamp', 'time']:
+            if col in self.df.columns:
+                date_col = col
+                break
+        
+        if date_col:
+            # Ensure date column matches target_date (string or datetime comparison)
+            # Assuming format YYYY-MM-DD in target_date
+            target_str = target_date.strftime('%Y-%m-%d')
+            # Try string conversion for filtering
+            mask = self.df[date_col].astype(str).str.startswith(target_str)
+            self.df = self.df[mask].copy()
+            print(f"Filtered data for {target_str}: {len(self.df)} rows")
+        
+        # Ensure required columns exist or map them
+        self.col_map = {
+            'symbol': 'symbol', # Option symbol
+            'root': 'root',     # Underlying symbol
+            'strike': 'strike',
+            'expiration': 'expiration',
+            'type': 'type',
+            'bid': 'bid',
+            'ask': 'ask',
+            'underlying': 'underlying_last' # Common name, fallback checked later
+        }
+        
+        # Adjust map based on actual columns
+        cols = self.df.columns
+        if 'contract_id' in cols:
+            self.col_map['symbol'] = 'contract_id'
+            if 'symbol' in cols:
+                self.col_map['root'] = 'symbol'
+        
+        if 'underlying_price' in cols: self.col_map['underlying'] = 'underlying_price'
+        elif 'underlying_last' in cols: self.col_map['underlying'] = 'underlying_last'
+        elif 'spot' in cols: self.col_map['underlying'] = 'spot'
+        
+        if 'strike_price' in cols: self.col_map['strike'] = 'strike_price'
+        if 'expiration_date' in cols: self.col_map['expiration'] = 'expiration_date'
+        if 'option_type' in cols: self.col_map['type'] = 'option_type'
+
+    def get_stock_latest_trade(self, symbol: str):
+        # Try to find underlying price from option data
+        # Look for rows matching the root symbol
+        
+        # 1. Try explicit column
+        if self.col_map['underlying'] in self.df.columns:
+            if self.col_map['root'] in self.df.columns:
+                subset = self.df[self.df[self.col_map['root']] == symbol]
+                if not subset.empty:
+                    price = subset[self.col_map['underlying']].iloc[0]
+                    return {'p': float(price)}
+            
+            price = self.df[self.col_map['underlying']].iloc[0]
+            return {'p': float(price)}
+            
+        # 2. Infer from Deep ITM Call (Delta ~ 1)
+        # Price = Strike + OptionPrice
+        if self.col_map['root'] in self.df.columns:
+            subset = self.df[self.df[self.col_map['root']] == symbol]
+        else:
+            subset = self.df
+            
+        if not subset.empty and 'delta' in subset.columns and 'mark' in subset.columns:
+            # Find call with delta > 0.95
+            calls = subset[(subset[self.col_map['type']] == 'call') & (subset['delta'] > 0.95)]
+            if not calls.empty:
+                best = calls.sort_values('delta', ascending=False).iloc[0]
+                strike = float(best[self.col_map['strike']])
+                mark = float(best['mark'])
+                inferred_price = strike + mark
+                print(f"Inferred underlying price for {symbol}: {inferred_price:.2f} (from ITM Call)")
+                return {'p': inferred_price}
+                
+        return {'p': 0.0}
+
+    def get_stock_snapshot(self, symbol: str):
+        trade = self.get_stock_latest_trade(symbol)
+        return {'latestTrade': trade, 'dailyBar': {'c': trade['p']}}
+
+    def get_option_contracts(self, underlying_symbol, expiration_date_gte, expiration_date_lte, strike_price_gte, strike_price_lte, limit=None, status=None, type=None):
+        # Filter dataframe
+        mask = pd.Series(True, index=self.df.index)
+        
+        # 0. Root Symbol
+        if self.col_map['root'] in self.df.columns:
+            mask &= (self.df[self.col_map['root']] == underlying_symbol)
+            
+        # 1. Expiration
+        mask &= (self.df[self.col_map['expiration']] >= expiration_date_gte) & (self.df[self.col_map['expiration']] <= expiration_date_lte)
+        # 2. Strike
+        mask &= (self.df[self.col_map['strike']] >= strike_price_gte) & (self.df[self.col_map['strike']] <= strike_price_lte)
+        
+        filtered = self.df[mask]
+        contracts = []
+        for _, row in filtered.iterrows():
+            contracts.append({
+                'symbol': row[self.col_map['symbol']],
+                'expiration_date': str(row[self.col_map['expiration']]),
+                'strike_price': row[self.col_map['strike']],
+                'type': row[self.col_map['type']],
+                'open_interest': row.get('open_interest', 0)
+            })
+        return contracts
+
+    def get_option_snapshot(self, symbol_or_symbols):
+        symbols = symbol_or_symbols.split(',')
+        snapshots = {}
+        for sym in symbols:
+            row = self.df[self.df[self.col_map['symbol']] == sym]
+            if not row.empty:
+                r = row.iloc[0]
+                snapshots[sym] = {
+                    'latestQuote': {'ap': r.get(self.col_map['ask'], 0), 'bp': r.get(self.col_map['bid'], 0)},
+                    'latestTrade': {'p': (r.get(self.col_map['ask'], 0) + r.get(self.col_map['bid'], 0)) / 2}, # Mid as trade
+                    'greeks': {
+                        'delta': r.get('delta'),
+                        'gamma': r.get('gamma'),
+                        'theta': r.get('theta'),
+                        'vega': r.get('vega'),
+                        'implied_volatility': r.get('implied_volatility')
+                    }
+                }
+        
+        if len(symbols) == 1:
+            return snapshots[symbols[0]]
+        return snapshots
+
+    def place_option_limit_order(self, **kwargs):
+        return self._mock_order(**kwargs)
+
+    def place_option_market_order(self, **kwargs):
+        return self._mock_order(**kwargs)
+
+    def _mock_order(self, **kwargs):
+        order = {'id': 'mock_order_id', 'status': 'filled', 'filled_at': self.target_date.isoformat(), **kwargs}
+        if self.save_order_file:
+            with open(self.save_order_file, 'w') as f:
+                json.dump(order, f, indent=2, default=str)
+            print(f"Mock order saved to {self.save_order_file}")
+        return order
 
 def get_closest_contract(contracts: List[Dict], target_strike: float, option_type: str) -> Optional[Dict]:
     """Finds the contract with strike price closest to target."""
@@ -206,11 +365,12 @@ def calculate_expected_move(price: float, iv: float, days: int) -> float:
     return price * iv * math.sqrt(days / 365.0)
 
 
-def check_dividend_risk(symbol: str, expiry_date: datetime) -> Tuple[bool, Optional[str], float, str]:
+def check_dividend_risk(symbol: str, expiry_date: datetime, reference_date: datetime = None) -> Tuple[bool, Optional[str], float, str]:
     """
     Checks if an ex-dividend date falls between now and expiration.
     Returns (safe, ex_date_str, amount, reason)
     """
+    if reference_date is None: reference_date = datetime.now()
     if not HAS_YFINANCE:
         return True, None, 0.0, "yfinance not available"
 
@@ -241,8 +401,7 @@ def check_dividend_risk(symbol: str, expiry_date: datetime) -> Tuple[bool, Optio
             else:
                 return True, None, 0.0, "Could not parse date"
                 
-            now = datetime.now()
-            if now <= ex_dt <= expiry_date:
+            if reference_date <= ex_dt <= expiry_date:
                 # Get estimated amount (last dividend)
                 amount = dividends.iloc[-1] if not dividends.empty else 0.0
                 return False, ex_dt.strftime("%Y-%m-%d"), float(amount), f"Ex-Div date {ex_dt.strftime('%Y-%m-%d')} before expiration"
@@ -253,11 +412,12 @@ def check_dividend_risk(symbol: str, expiry_date: datetime) -> Tuple[bool, Optio
     return True, None, 0.0, "Check failed"
 
 
-def check_earnings_risk(symbol: str, days_buffer: int = 7) -> Tuple[bool, Optional[str], Optional[datetime], str]:
+def check_earnings_risk(symbol: str, days_buffer: int = 7, reference_date: datetime = None) -> Tuple[bool, Optional[str], Optional[datetime], str]:
     """
     Checks if earnings are within the buffer period.
     Returns (safe_to_trade, earnings_date_str, earnings_datetime, reason)
     """
+    if reference_date is None: reference_date = datetime.now()
     if not HAS_YFINANCE:
         return True, None, None, "yfinance not available"
     
@@ -282,7 +442,7 @@ def check_earnings_risk(symbol: str, days_buffer: int = 7) -> Tuple[bool, Option
                     next_earnings = datetime.strptime(str(next_earnings)[:10], "%Y-%m-%d")
             
             earnings_str = next_earnings.strftime("%Y-%m-%d")
-            days_to_earnings = (next_earnings - datetime.now()).days
+            days_to_earnings = (next_earnings - reference_date).days
             
             if 0 <= days_to_earnings <= days_buffer:
                 return False, earnings_str, next_earnings, f"Earnings in {days_to_earnings} days"
@@ -579,7 +739,8 @@ def optimize_spread(client, symbol: str, current_price: float, contracts: List[D
                     top_n: int = 5, earnings_date: Optional[datetime] = None,
                     support_price: Optional[float] = None,
                     historical_volatility: Optional[float] = None,
-                    rsi: Optional[float] = None) -> List[Dict]:
+                    rsi: Optional[float] = None,
+                    reference_date: datetime = None) -> List[Dict]:
     """
     Scans multiple parameter combinations and returns top N optimized recommendations.
     
@@ -608,12 +769,13 @@ def optimize_spread(client, symbol: str, current_price: float, contracts: List[D
     MAX_BID_ASK_SPREAD_PCT = 0.35
     MIN_CREDIT_ABS = 0.05
     
+    if reference_date is None: reference_date = datetime.now()
     candidates = []
     
     for exp_date, exp_contracts in expirations.items():
         try:
             exp_dt = datetime.strptime(exp_date, "%Y-%m-%d")
-            dte = (exp_dt - datetime.now()).days
+            dte = (exp_dt - reference_date).days
         except:
             continue
             
@@ -814,8 +976,7 @@ def optimize_spread(client, symbol: str, current_price: float, contracts: List[D
                 # Earnings Penalty
                 if earnings_date:
                     # Check if earnings falls between now and expiration
-                    now = datetime.now()
-                    if now < earnings_date <= exp_dt:
+                    if reference_date < earnings_date <= exp_dt:
                         score *= 0.85 # 15% penalty for holding through earnings
                 
                 # Technical Analysis Bonus/Penalty
@@ -991,6 +1152,9 @@ def main():
                         help="Scan all parameter combinations and show top recommendations")
     parser.add_argument("--top", type=int, default=5,
                         help="Number of recommendations to show in optimize mode (default: 5)")
+    parser.add_argument("--parquet", type=str, help="Path to historical parquet file (mock mode)")
+    parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
+    parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
     
     args = parser.parse_args()
 
@@ -1018,7 +1182,17 @@ def main():
     max_spread_pct = default_max_spread_pct
     skip_checks = args.skip_checks
 
-    client = AlpacaClient()
+    # Determine Reference Date
+    if args.date:
+        reference_date = datetime.strptime(args.date, "%Y-%m-%d")
+    else:
+        reference_date = datetime.now()
+
+    if args.parquet:
+        client = MockOptionClient(args.parquet, reference_date, args.save_order)
+    else:
+        client = AlpacaClient()
+
     symbol = args.symbol.upper()
     
     # Get Account Info (for buying power check)
@@ -1136,7 +1310,7 @@ def main():
     # --- Earnings Check ---
     earnings_dt = None
     if not args.skip_earnings:
-        earnings_safe, earnings_date, earnings_dt, earnings_reason = check_earnings_risk(symbol)
+        earnings_safe, earnings_date, earnings_dt, earnings_reason = check_earnings_risk(symbol, reference_date=reference_date)
         
         if not skip_checks and not earnings_safe:
             # First check: Earnings < 7 days
@@ -1170,8 +1344,8 @@ def main():
     long_strike_target = short_strike_target - args.width
 
     # 3. Find Options
-    start_date = (datetime.now() + timedelta(days=args.days)).strftime("%Y-%m-%d")
-    end_date = (datetime.now() + timedelta(days=args.days + args.window)).strftime("%Y-%m-%d")
+    start_date = (reference_date + timedelta(days=args.days)).strftime("%Y-%m-%d")
+    end_date = (reference_date + timedelta(days=args.days + args.window)).strftime("%Y-%m-%d")
 
     if not args.json:
         print(f"Searching for contracts expiring >= {start_date}...")
@@ -1226,7 +1400,7 @@ def main():
     # Calculate days out
     try:
         exp_dt = datetime.strptime(selected_exp, "%Y-%m-%d")
-        d_out = (exp_dt - datetime.now()).days
+        d_out = (exp_dt - reference_date).days
     except:
         d_out = "?"
         exp_dt = None
@@ -1237,13 +1411,12 @@ def main():
     # Check if earnings fall during the trade
     if earnings_dt and exp_dt and not args.skip_earnings:
         # Check if Earnings falls between NOW and EXPIRATION
-        now = datetime.now()
-        if now < earnings_dt <= exp_dt:
+        if reference_date < earnings_dt <= exp_dt:
              warnings.append(f"Earnings release on {earnings_date} falls before expiration")
 
     # --- Dividend Check ---
     if exp_dt:
-        div_safe, div_date, div_amt, div_reason = check_dividend_risk(symbol, exp_dt)
+        div_safe, div_date, div_amt, div_reason = check_dividend_risk(symbol, exp_dt, reference_date=reference_date)
         if not div_safe:
              msg = f"Dividend Ex-Date {div_date} before expiry (${div_amt:.2f} drop)"
              if not args.json:
@@ -1298,7 +1471,8 @@ def main():
                     earnings_date=earnings_dt,
                     support_price=support_price,
                     historical_volatility=trend_details.get('hv30'),
-                    rsi=trend_details.get('rsi')
+                    rsi=trend_details.get('rsi'),
+                    reference_date=reference_date
                 )
                 
                 if args.json:
@@ -1888,7 +2062,7 @@ def main():
     email_lines = []
     email_lines.append(f"Bull Put Spread: {symbol}")
     email_lines.append("=" * 30)
-    email_lines.append(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    email_lines.append(f"Date: {reference_date.strftime('%Y-%m-%d %H:%M:%S')}")
     if current_price > 0:
         email_lines.append(f"Current Price: ${current_price:.2f}")
     email_lines.append(f"Expiration: {selected_exp}")
@@ -2008,27 +2182,28 @@ def main():
             short_mid = (float(short_quote.get('bp', 0)) + float(short_quote.get('ap', 0))) / 2
             long_mid = (float(long_quote.get('bp', 0)) + float(long_quote.get('ap', 0))) / 2
             
-            limit_credit = short_mid - long_mid
+            limit_credit = round(short_mid - long_mid, 2)
             
             if not args.json:
                 print(f"Limit Credit: ${limit_credit:.2f} (mid-price)")
             
             # Note: Alpaca may require different API call for limit orders
             # This assumes the client supports limit_price parameter
-            response = client.place_option_limit_order(
-                legs=legs,
-                quantity=args.quantity,
-                limit_price=limit_credit,
-                time_in_force='day',
-                order_class='mleg'
-            )
+            # Pass entry_cash_flow for mock orders (Credit = positive cash flow)
+            entry_cash_flow = limit_credit
+            kwargs = {'legs': legs, 'quantity': args.quantity, 'limit_price': limit_credit, 'time_in_force': 'day', 'order_class': 'mleg'}
+            if isinstance(client, MockOptionClient):
+                kwargs['entry_cash_flow'] = entry_cash_flow
+
+            response = client.place_option_limit_order(**kwargs)
         else:
-            response = client.place_option_market_order(
-                legs=legs,
-                quantity=args.quantity,
-                time_in_force='day',
-                order_class='mleg'
-            )
+            # Pass entry_cash_flow for mock orders (Credit = positive cash flow)
+            entry_cash_flow = metrics['net_credit']
+            kwargs = {'legs': legs, 'quantity': args.quantity, 'time_in_force': 'day', 'order_class': 'mleg'}
+            if isinstance(client, MockOptionClient):
+                kwargs['entry_cash_flow'] = entry_cash_flow
+
+            response = client.place_option_market_order(**kwargs)
         
         result = {
             "status": "executed",
