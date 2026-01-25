@@ -53,8 +53,7 @@ def get_weekly_schedule(start_date, end_date):
     return schedule
 
 def run_command(cmd, verbose=False):
-    if verbose:
-        print(f"Exec: {' '.join(cmd)}")
+    print(f"Exec: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
         return result
@@ -133,7 +132,7 @@ def main():
         
         if not res_open or res_open.returncode != 0:
             print(f"  ❌ Open failed on {open_str}")
-            if res_open and args.verbose:
+            if res_open:
                 print(f"     Stderr: {res_open.stderr.strip()}")
             continue
             
@@ -157,7 +156,7 @@ def main():
         
         if not res_close or res_close.returncode != 0:
             print(f"  ❌ Close failed on {close_str}")
-            if res_close and args.verbose:
+            if res_close:
                 print(f"     Stderr: {res_close.stderr.strip()}")
             continue
             
