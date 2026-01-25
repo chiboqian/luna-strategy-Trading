@@ -10,6 +10,7 @@ import json
 import sys
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser(description="Close Mock Order and Calculate P&L")
@@ -30,7 +31,17 @@ def main():
 
     # Load data
     try:
-        df = pd.read_parquet(args.parquet)
+        path_input = Path(args.parquet)
+        if path_input.is_dir():
+            # New structure: folder -> year -> date.parquet
+            year_str = args.date.split('-')[0]
+            file_path = path_input / year_str / f"{args.date}.parquet"
+            if not file_path.exists():
+                raise FileNotFoundError(f"Daily parquet file not found: {file_path}")
+            print(f"Loading {file_path}...")
+            df = pd.read_parquet(file_path)
+        else:
+            df = pd.read_parquet(args.parquet)
     except Exception as e:
         print(f"Error loading parquet file: {e}", file=sys.stderr)
         sys.exit(1)

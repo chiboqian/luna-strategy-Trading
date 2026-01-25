@@ -73,26 +73,40 @@ class MockOptionClient:
         if pd is None:
             raise ImportError("pandas is required for MockOptionClient")
         
-        print(f"Loading historical data from {parquet_file}...")
-        self.df = pd.read_parquet(parquet_file)
         self.target_date = target_date
         self.save_order_file = save_order_file
         
-        # Filter by date if 'date' or 'quote_date' column exists
-        date_col = None
-        for col in ['date', 'quote_date', 'timestamp', 'time']:
-            if col in self.df.columns:
-                date_col = col
-                break
-        
-        if date_col:
-            # Ensure date column matches target_date (string or datetime comparison)
-            # Assuming format YYYY-MM-DD in target_date
-            target_str = target_date.strftime('%Y-%m-%d')
-            # Try string conversion for filtering
-            mask = self.df[date_col].astype(str).str.startswith(target_str)
-            self.df = self.df[mask].copy()
-            print(f"Filtered data for {target_str}: {len(self.df)} rows")
+        path_input = Path(parquet_file)
+        if path_input.is_dir():
+            # New structure: folder -> year -> date.parquet
+            year_str = str(target_date.year)
+            date_str = target_date.strftime('%Y-%m-%d')
+            file_path = path_input / year_str / f"{date_str}.parquet"
+            
+            if not file_path.exists():
+                raise FileNotFoundError(f"Daily parquet file not found: {file_path}")
+                
+            print(f"Loading historical data from {file_path}...")
+            self.df = pd.read_parquet(file_path)
+        else:
+            print(f"Loading historical data from {parquet_file}...")
+            self.df = pd.read_parquet(parquet_file)
+            
+            # Filter by date if 'date' or 'quote_date' column exists
+            date_col = None
+            for col in ['date', 'quote_date', 'timestamp', 'time']:
+                if col in self.df.columns:
+                    date_col = col
+                    break
+            
+            if date_col:
+                # Ensure date column matches target_date (string or datetime comparison)
+                # Assuming format YYYY-MM-DD in target_date
+                target_str = target_date.strftime('%Y-%m-%d')
+                # Try string conversion for filtering
+                mask = self.df[date_col].astype(str).str.startswith(target_str)
+                self.df = self.df[mask].copy()
+                print(f"Filtered data for {target_str}: {len(self.df)} rows")
         
         # Ensure required columns exist or map them
         self.col_map = {

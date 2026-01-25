@@ -67,7 +67,7 @@ def main():
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread"], help="Strategy to run")
     parser.add_argument("--symbol", required=True, help="Symbol (e.g. SPY)")
-    parser.add_argument("--parquet", required=True, help="Path to historical parquet file")
+    parser.add_argument("--parquet", required=True, help="Path to historical parquet file or dataset directory")
     parser.add_argument("--output-dir", required=True, help="Directory to save results")
     parser.add_argument("--strategy-args", default="", help="Additional args for strategy script (e.g. '--days 45')")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
