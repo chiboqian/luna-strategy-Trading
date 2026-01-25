@@ -90,25 +90,50 @@ def analyze_results(directory: str, output_csv: str = None):
     df['drawdown'] = df['cumulative_pnl'] - df['peak']
     max_drawdown = df['drawdown'].min()
     
-    print("\n" + "="*40)
-    print(f"Backtest Analysis Report")
-    print("="*40)
-    print(f"Total Trades:    {total_trades}")
-    print(f"Total P&L:       ${total_pnl:,.2f}")
-    print(f"Expectancy:      ${expectancy:,.2f} per trade")
-    print(f"Win Rate:        {win_rate:.1%} ({win_count}W / {loss_count}L)")
-    print(f"Avg Win:         ${avg_win:,.2f}")
-    print(f"Avg Loss:        ${avg_loss:,.2f}")
-    print(f"Profit Factor:   {profit_factor:.2f}")
-    print(f"Max Drawdown:    ${max_drawdown:,.2f}")
+    # Biggest Win/Loss
+    best_trade = df.loc[df['total_pnl'].idxmax()] if not df.empty else None
+    worst_trade = df.loc[df['total_pnl'].idxmin()] if not df.empty else None
+
+    lines = []
+    lines.append("\n" + "="*40)
+    lines.append(f"Backtest Analysis Report")
+    lines.append("="*40)
+    lines.append(f"Total Trades:    {total_trades}")
+    lines.append(f"Total P&L:       ${total_pnl:,.2f}")
+    lines.append(f"Expectancy:      ${expectancy:,.2f} per trade")
+    lines.append(f"Win Rate:        {win_rate:.1%} ({win_count}W / {loss_count}L)")
+    lines.append(f"Avg Win:         ${avg_win:,.2f}")
+    lines.append(f"Avg Loss:        ${avg_loss:,.2f}")
+    lines.append(f"Profit Factor:   {profit_factor:.2f}")
+    lines.append(f"Max Drawdown:    ${max_drawdown:,.2f}")
+    
+    if best_trade is not None:
+        date_str = best_trade['close_date'].strftime('%Y-%m-%d') if pd.notnull(best_trade['close_date']) else "N/A"
+        lines.append(f"Biggest Win:     ${best_trade['total_pnl']:,.2f} ({date_str})")
+    
+    if worst_trade is not None:
+        date_str = worst_trade['close_date'].strftime('%Y-%m-%d') if pd.notnull(worst_trade['close_date']) else "N/A"
+        lines.append(f"Biggest Loss:    ${worst_trade['total_pnl']:,.2f} ({date_str})")
     
     # Monthly breakdown
     if 'close_date' in df.columns:
-        print("\n--- Monthly P&L ---")
+        lines.append("\n--- Monthly P&L ---")
         df['month'] = df['close_date'].dt.to_period('M')
         monthly = df.groupby('month')['total_pnl'].sum()
         for period, pnl in monthly.items():
-            print(f"{period}: ${pnl:,.2f}")
+            lines.append(f"{period}: ${pnl:,.2f}")
+
+    report_text = "\n".join(lines)
+    print(report_text)
+
+    # Save report to file
+    report_path = p / "analysis_report.txt"
+    try:
+        with open(report_path, "w") as f:
+            f.write(report_text)
+        print(f"\nSaved report to: {report_path}")
+    except Exception as e:
+        print(f"Error saving report: {e}", file=sys.stderr)
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze backtest P&L files")
