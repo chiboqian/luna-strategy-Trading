@@ -51,7 +51,22 @@ def query_parquet(file_path, query=None, columns=None, limit=10, describe=False,
             print(f"DuckDB Error: {e}", file=sys.stderr)
             sys.exit(1)
     else:
-        if HAS_DUCKDB:
+        # Optimization: Try to push down pandas query to DuckDB SQL if possible
+        if query and HAS_DUCKDB:
+            # Heuristic: Convert pandas '==' to SQL '='
+            sql_where = query.replace("==", "=")
+            cols_select = "*"
+            if columns:
+                cols_select = ", ".join([f'"{c}"' for c in columns])
+            
+            try:
+                df = duckdb.sql(f"SELECT {cols_select} FROM '{file_path}' WHERE {sql_where}").df()
+                query = None # Filter already applied
+            except Exception:
+                # Fallback to loading full DF if SQL translation fails
+                pass
+
+        if HAS_DUCKDB and df is None:
             cols = "*"
             if columns:
                 cols = ", ".join([f'"{c}"' for c in columns])
@@ -71,7 +86,7 @@ def query_parquet(file_path, query=None, columns=None, limit=10, describe=False,
             try:
                 with warnings.catch_warnings():
                     warnings.simplefilter(action='ignore', category=FutureWarning)
-                    df = df.query(query)
+                    df = df.query(query, engine='python')
             except Exception as e:
                 print(f"Error executing query '{query}': {e}", file=sys.stderr)
                 print("Hint: Use '==' for equality and quotes for strings (e.g., \"type == 'call'\")", file=sys.stderr)
