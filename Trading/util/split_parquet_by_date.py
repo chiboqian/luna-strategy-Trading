@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Splits a Parquet file into multiple CSV files grouped by date.
-Creates subfolders for each year (e.g., output_dir/2023/2023-01-01.csv).
+Splits a Parquet file into multiple CSV or Parquet files grouped by date.
+Creates subfolders for each year (e.g., output_dir/2023/2023-01-01.csv|parquet).
 
 Usage:
     python util/split_parquet_by_date.py data.parquet --output-dir exported_data
@@ -13,7 +13,7 @@ from pathlib import Path
 import sys
 import os
 
-def split_parquet(input_file, output_dir, date_col=None):
+def split_parquet(input_file, output_dir, date_col=None, output_format="parquet"):
     input_path = Path(input_file)
     if not input_path.exists():
         print(f"Error: File {input_file} not found.")
@@ -84,19 +84,25 @@ def split_parquet(input_file, output_dir, date_col=None):
         year_dir.mkdir(exist_ok=True)
         
         daily_df = df[df[date_col].dt.date == d]
-        daily_df.to_csv(year_dir / f"{date_str}.csv", index=False)
+        
+        if output_format == "parquet":
+            daily_df.to_parquet(year_dir / f"{date_str}.parquet", index=False)
+        else:
+            daily_df.to_csv(year_dir / f"{date_str}.csv", index=False)
+            
         count += 1
         
         if count % 10 == 0:
             print(f"Processed {count}/{len(unique_dates)} days...", end='\r')
 
-    print(f"\nSuccessfully created {count} CSV files in {output_base}")
+    print(f"\nSuccessfully created {count} {output_format.upper()} files in {output_base}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Split a Parquet file into daily CSV files organized by year.")
+    parser = argparse.ArgumentParser(description="Split a Parquet file into daily CSV/Parquet files organized by year.")
     parser.add_argument("input_file", help="Path to the input Parquet file")
     parser.add_argument("--output-dir", required=True, help="Directory where output folders will be created")
     parser.add_argument("--date-col", help="Name of the date column to split by (optional, auto-detected)")
+    parser.add_argument("--format", choices=["csv", "parquet"], default="parquet", help="Output format (default: parquet)")
     args = parser.parse_args()
     
-    split_parquet(args.input_file, args.output_dir, args.date_col)
+    split_parquet(args.input_file, args.output_dir, args.date_col, args.format)
