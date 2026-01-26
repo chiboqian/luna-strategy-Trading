@@ -157,16 +157,32 @@ class MockOptionClient:
         else:
             subset = self.df
             
-        if not subset.empty and 'delta' in subset.columns and 'mark' in subset.columns:
-            # Find call with delta > 0.95
-            calls = subset[(subset[self.col_map['type']] == 'call') & (subset['delta'] > 0.95)]
+        if not subset.empty:
+            calls = subset[subset[self.col_map['type']] == 'call']
             if not calls.empty:
-                best = calls.sort_values('delta', ascending=False).iloc[0]
-                strike = float(best[self.col_map['strike']])
-                mark = float(best['mark'])
-                inferred_price = strike + mark
-                print(f"Inferred underlying price for {symbol}: {inferred_price:.2f} (from ITM Call)")
-                return {'p': inferred_price}
+                best_call = None
+                if 'delta' in calls.columns:
+                    deep_itm = calls[calls['delta'] > 0.9]
+                    if not deep_itm.empty:
+                        best_call = deep_itm.sort_values('delta', ascending=False).iloc[0]
+                
+                if best_call is None:
+                    best_call = calls.sort_values(self.col_map['strike'], ascending=True).iloc[0]
+                
+                strike = float(best_call[self.col_map['strike']])
+                opt_price = 0.0
+                
+                if 'mark' in best_call:
+                    opt_price = float(best_call['mark'])
+                elif self.col_map['bid'] in best_call and self.col_map['ask'] in best_call:
+                    bid = float(best_call[self.col_map['bid']])
+                    ask = float(best_call[self.col_map['ask']])
+                    opt_price = (bid + ask) / 2 if (bid > 0 and ask > 0) else max(bid, ask)
+                
+                if opt_price > 0:
+                    inferred_price = strike + opt_price
+                    print(f"Inferred underlying price for {symbol}: {inferred_price:.2f} (from ITM Call)")
+                    return {'p': inferred_price}
                 
         return {'p': 0.0}
 
