@@ -1,0 +1,26 @@
+Bull Put Spread: QQQ
+==============================
+Date: 2026-01-26 11:32:28
+Current Price: $627.36
+Expiration: 2026-02-13
+
+Structure:
+- SELL: QQQ260213P00614000 (~$5.54)
+- BUY: QQQ260213P00609000 (~$4.54)
+
+Financial Analysis (Per Share):
+Net Credit:    $1.00
+Max Profit:    $1.00
+Max Loss:      $4.00
+Break Even:    $613.00
+Risk/Reward:   25.00%
+P(Profit):     70.1%
+Exp. Value:    $0.24
+IV Rank:       50%
+
+Target Quantity: 1
+
+Warnings:
+  • Short strike $614.00 is above 20-day support $607.05
+
+Context: Dry Run=True, Limit=False
