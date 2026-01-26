@@ -778,6 +778,66 @@ class AlpacaClient:
                 return response['snapshot']
             return response
     
+    def get_option_bars(self, symbol_or_symbols: Union[str, List[str]], timeframe: str = "1Min",
+                       start: Optional[str] = None, end: Optional[str] = None,
+                       limit: int = 1000, page_token: Optional[str] = None) -> Dict:
+        """
+        Get historical option bars.
+        Returns full response dict including 'bars' and 'next_page_token'.
+        """
+        params = {
+            'timeframe': timeframe,
+            'limit': limit
+        }
+        if start: params['start'] = start
+        if end: params['end'] = end
+        if page_token: params['page_token'] = page_token
+        
+        if isinstance(symbol_or_symbols, list):
+            params['symbols'] = ','.join(symbol_or_symbols)
+        else:
+            params['symbols'] = symbol_or_symbols
+            
+        return self._make_request('GET', '/v1beta1/options/bars', use_data_api=True, params=params)
+
+    def get_option_trades(self, symbol_or_symbols: Union[str, List[str]],
+                         start: Optional[str] = None, end: Optional[str] = None,
+                         limit: int = 1000, page_token: Optional[str] = None) -> Dict:
+        """
+        Get historical option trades.
+        Returns full response dict including 'trades' and 'next_page_token'.
+        """
+        params = {'limit': limit}
+        if start: params['start'] = start
+        if end: params['end'] = end
+        if page_token: params['page_token'] = page_token
+        
+        if isinstance(symbol_or_symbols, list):
+            params['symbols'] = ','.join(symbol_or_symbols)
+        else:
+            params['symbols'] = symbol_or_symbols
+            
+        return self._make_request('GET', '/v1beta1/options/trades', use_data_api=True, params=params)
+        
+    def get_option_quotes(self, symbol_or_symbols: Union[str, List[str]],
+                         start: Optional[str] = None, end: Optional[str] = None,
+                         limit: int = 1000, page_token: Optional[str] = None) -> Dict:
+        """
+        Get historical option quotes.
+        Returns full response dict including 'quotes' and 'next_page_token'.
+        """
+        params = {'limit': limit}
+        if start: params['start'] = start
+        if end: params['end'] = end
+        if page_token: params['page_token'] = page_token
+        
+        if isinstance(symbol_or_symbols, list):
+            params['symbols'] = ','.join(symbol_or_symbols)
+        else:
+            params['symbols'] = symbol_or_symbols
+            
+        return self._make_request('GET', '/v1beta1/options/quotes', use_data_api=True, params=params)
+
     def _calculate_start_time(self, days: int = 0, hours: int = 0, minutes: int = 0, start: Optional[str] = None) -> str:
         """Helper to calculate start time for historical data queries"""
         if start:

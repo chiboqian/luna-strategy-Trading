@@ -65,7 +65,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run weekly backtest cycle")
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread"], help="Strategy to run")
+    parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor"], help="Strategy to run")
     parser.add_argument("--symbol", required=True, help="Symbol (e.g. SPY)")
     parser.add_argument("--parquet", required=True, help="Path to historical parquet file or dataset directory")
     parser.add_argument("--output-dir", required=True, help="Directory to save results")

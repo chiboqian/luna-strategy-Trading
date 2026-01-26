@@ -337,16 +337,56 @@ def main():
         # We need strikes around ATM and Protection target
         min_strike = prot_strike_target * 0.8
         max_strike = atm_strike_target * 1.2
-        
-        contracts = client.get_option_contracts(
-            underlying_symbol=symbol,
-            expiration_date_gte=start_date,
-            expiration_date_lte=end_date,
-            strike_price_gte=min_strike,
-            strike_price_lte=max_strike,
-            limit=10000, # Max limit to get all relevant ones
-            status='active'
-        )
+
+        # Debug: Print parameters for API call
+        print("[DEBUG] Fetching option contracts with parameters:")
+        print(f"  underlying_symbol: {symbol}")
+        print(f"  expiration_date_gte: {start_date}")
+        print(f"  expiration_date_lte: {end_date}")
+        print(f"  strike_price_gte: {min_strike}")
+        print(f"  strike_price_lte: {max_strike}")
+        print(f"  limit: 10000")
+        print(f"  status: active")
+
+        # Try to print the raw API response if possible
+        try:
+            raw_response = client.raw_option_contracts_response if hasattr(client, 'raw_option_contracts_response') else None
+        except Exception as e:
+            raw_response = f"[DEBUG] Could not access raw response: {e}"
+
+        contracts = None
+        api_error = None
+        try:
+            contracts = client.get_option_contracts(
+                underlying_symbol=symbol,
+                expiration_date_gte=start_date,
+                expiration_date_lte=end_date,
+                strike_price_gte=min_strike,
+                strike_price_lte=max_strike,
+                limit=10000, # Max limit to get all relevant ones
+                status='active'
+            )
+        except Exception as e:
+            api_error = str(e)
+
+        print(f"[DEBUG] Raw API response (if available): {raw_response}")
+        if api_error:
+            print(f"[DEBUG] Exception from get_option_contracts: {api_error}")
+        if contracts is not None:
+            print(f"[DEBUG] Number of contracts returned: {len(contracts)}")
+            if contracts:
+                print(f"[DEBUG] First contract: {json.dumps(contracts[0], indent=2, default=str)}")
+            else:
+                print("[DEBUG] No contracts returned.")
+        else:
+            print("[DEBUG] No contracts object returned from API call.")
+        if api_error:
+            err = {"error": f"Failed to fetch contracts: {api_error}"}
+            if args.json:
+                print(json.dumps(err))
+            else:
+                print(f"Error fetching contracts: {api_error}", file=sys.stderr)
+            return
     except Exception as e:
         err = {"error": f"Failed to fetch contracts: {e}"}
         if args.json:
