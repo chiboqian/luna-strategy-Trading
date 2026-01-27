@@ -186,7 +186,10 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
         print("Warning: The dataset is empty (0 rows).")
 
     print(f"Total rows: {len(df)}")
-    print(df.head(limit))
+    if limit == 0:
+        print(df)
+    else:
+        print(df.head(limit))
     return df
 
 
@@ -201,7 +204,7 @@ def main():
     parser.add_argument("--query", help="Pandas query string (e.g., 'col > 5 and col2 == \"val\"')", default=None)
     parser.add_argument("--sql", help="DuckDB SQL query (e.g., 'SELECT * FROM TABLE WHERE price > 100')", default=None)
     parser.add_argument("--columns", nargs="*", help="Columns to select", default=None)
-    parser.add_argument("--limit", type=int, default=10, help="Number of rows to display")
+    parser.add_argument("--limit", type=int, default=10, help="Number of rows to display (0 for all)")
     parser.add_argument("--describe", action="store_true", help="Show dataset schema and info")
     parser.add_argument("--unique", help="Show unique values for a specific column")
     parser.add_argument("--type", choices=['csv', 'json', 'dbn'], help="Force file type (csv, json, dbn). Default: inferred from extension (supports .dbz)")

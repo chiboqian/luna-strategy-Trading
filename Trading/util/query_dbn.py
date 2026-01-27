@@ -130,7 +130,10 @@ def query_dbn(file_path, query=None, columns=None, limit=10, describe=False, uni
         print("⚠️ Result is empty.")
     else:
         print(f"\nTotal rows: {len(df)}")
-        print(df.head(limit))
+        if limit == 0:
+            print(df)
+        else:
+            print(df.head(limit))
 
 
 def main():
@@ -143,7 +146,7 @@ def main():
     parser.add_argument("--query", help="Pandas query string")
     parser.add_argument("--sql", help="SQL query (DuckDB). Use 'TABLE' as placeholder.")
     parser.add_argument("--columns", nargs="*", help="Columns to select")
-    parser.add_argument("--limit", type=int, default=10, help="Number of rows to display")
+    parser.add_argument("--limit", type=int, default=10, help="Number of rows to display (0 for all)")
     parser.add_argument("--describe", action="store_true", help="Show schema and stats")
     parser.add_argument("--unique", help="Show unique values for a column")
     
