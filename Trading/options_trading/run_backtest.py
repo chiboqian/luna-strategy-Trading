@@ -21,13 +21,24 @@ from pandas.tseries.offsets import CustomBusinessDay
 from pathlib import Path
 import shlex
 
-def get_backtest_schedule(start_date, end_date, hold_days=None):
+def get_backtest_schedule(start_date, end_date, hold_days=None, every_day=False):
     """
-    Returns a list of (open_date, close_date) tuples for each week.
+    Returns a list of (open_date, close_date) tuples.
     Handles US holidays.
     """
     us_bd = CustomBusinessDay(calendar=USFederalHolidayCalendar())
     bdays = pd.date_range(start=start_date, end=end_date, freq=us_bd)
+    
+    if every_day:
+        schedule = []
+        for day in bdays:
+            open_date = day
+            if hold_days is not None:
+                close_date = open_date + (hold_days * us_bd)
+            else:
+                close_date = open_date  # Default to same-day close for daily mode
+            schedule.append((open_date, close_date))
+        return schedule
     
     weeks = {}
     for day in bdays:
@@ -79,6 +90,7 @@ def main():
     parser.add_argument("--hold-days", type=int, default=None, help="Number of business days to hold position (default: close on last day of week)")
     parser.add_argument("--entry-time", default="09:30:00", help="Time of entry (HH:MM:SS)")
     parser.add_argument("--exit-time", default="15:55:00", help="Time of exit (HH:MM:SS)")
+    parser.add_argument("--every-day", action="store_true", help="Run backtest every trading day (instead of weekly)")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     
     args = parser.parse_args()
@@ -106,7 +118,7 @@ def main():
     # Generate Schedule
     print(f"Generating schedule from {args.start_date} to {args.end_date}...")
     try:
-        schedule = get_backtest_schedule(args.start_date, args.end_date, args.hold_days)
+        schedule = get_backtest_schedule(args.start_date, args.end_date, args.hold_days, args.every_day)
     except Exception as e:
         print(f"Error generating schedule: {e}", file=sys.stderr)
         sys.exit(1)

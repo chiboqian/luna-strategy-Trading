@@ -13,7 +13,7 @@ The combination of Leg 1 (Long Call) provides the unlimited upside.
 Net result: "Synthetic Long Stock" with downside capped at the OTM strike.
 
 Usage:
-    python util/synthetic_long.py SPY --days 30 --protection-pct 5 --quantity 1
+    python util/synthetic_long.py SPY --days 30 --with-protection --protection-pct 5 --quantity 1
 """
 
 import sys
@@ -84,6 +84,7 @@ def main():
     parser.add_argument("--days", type=int, default=default_days, help=f"Days to expiration (min), default {default_days}")
     parser.add_argument("--window", type=int, default=default_window, help=f"Search window (days) after min days, default {default_window}")
     parser.add_argument("--protection-pct", type=float, default=default_prot_pct, help=f"Protective Put distance from spot (%%), default {default_prot_pct}")
+    parser.add_argument("--with-protection", action="store_true", help="Enable protective put (default: pure synthetic long)")
     parser.add_argument("--amount", type=float, default=None, help=f"Notional dollar amount to invest (default ${default_amount})")
     parser.add_argument("--limit-order", action="store_true", help="Use limit order at mid-price instead of market order")
     parser.add_argument("--max-spread", type=float, default=5.0, help="Max bid/ask spread percent (default: 5.0)")
@@ -159,12 +160,17 @@ def main():
 
     # 2. Determine Targets
     atm_strike_target = current_price
-    prot_strike_target = current_price * (1.0 - (args.protection_pct / 100.0))
+    prot_strike_target = None
+    if args.with_protection:
+        prot_strike_target = current_price * (1.0 - (args.protection_pct / 100.0))
     
     if not args.json:
         print(f"Symbol: {symbol}")
         print(f"Current Price: ${current_price:.2f}")
-        print(f"Targets -> ATM: ${atm_strike_target:.2f}, Prot: ${prot_strike_target:.2f} (-{args.protection_pct}%)")
+        if prot_strike_target:
+            print(f"Targets -> ATM: ${atm_strike_target:.2f}, Prot: ${prot_strike_target:.2f} (-{args.protection_pct}%)")
+        else:
+            print(f"Targets -> ATM: ${atm_strike_target:.2f}, Prot: None (Pure Synthetic)")
 
     # 3. Find Options
     # Look for contracts expiring after roughly args.days
@@ -179,7 +185,10 @@ def main():
     try:
         # Optimization: Narrow search to relevant strikes to avoid fetching thousands of contracts
         # We need strikes around ATM and Protection target
-        min_strike = prot_strike_target * 0.8
+        if prot_strike_target:
+            min_strike = prot_strike_target * 0.8
+        else:
+            min_strike = atm_strike_target * 0.8
         max_strike = atm_strike_target * 1.2
 
         # Debug: Print parameters for API call
@@ -281,13 +290,15 @@ def main():
     # 2. ATM Put
     atm_put = get_closest_contract(exp_contracts, atm_strike_target, 'put')
     # 3. Protective Put
-    prot_put = get_closest_contract(exp_contracts, prot_strike_target, 'put')
+    prot_put = None
+    if args.with_protection:
+        prot_put = get_closest_contract(exp_contracts, prot_strike_target, 'put')
     
     # Validate legs
     missing = []
     if not atm_call: missing.append("ATM Call")
     if not atm_put: missing.append("ATM Put")
-    if not prot_put: missing.append("Protective Put")
+    if args.with_protection and not prot_put: missing.append("Protective Put")
     
     if missing:
         err = {"error": f"Could not find required legs: {', '.join(missing)}"}
@@ -300,12 +311,15 @@ def main():
     # Check for strike logic
     call_strike = float(atm_call['strike_price'])
     put_strike = float(atm_put['strike_price'])
-    prot_strike = float(prot_put['strike_price'])
+    prot_strike = float(prot_put['strike_price']) if prot_put else 0.0
     
     if not args.json:
         print(f"Leg 1 (Long Call): {atm_call['symbol']} Strike=${call_strike}")
         print(f"Leg 2 (Short Put): {atm_put['symbol']}  Strike=${put_strike}")
-        print(f"Leg 3 (Prot Put):  {prot_put['symbol']}  Strike=${prot_strike}")
+        if prot_put:
+            print(f"Leg 3 (Prot Put):  {prot_put['symbol']}  Strike=${prot_strike}")
+        else:
+            print(f"Leg 3 (Prot Put):  None")
 
     # Build Legs List
     legs = []
@@ -313,12 +327,15 @@ def main():
     if args.dry_run and not args.json:
         print("\n--- Strategy Analysis ---")
         print(f"Syntheitc Long: Buy Call ${call_strike} / Sell Put ${put_strike}")
-        print(f"Protective Put: Buy Put ${prot_strike}")
-        
-        # Max Risk Analysis
-        # Risk from Short Put is capped by Long Put
-        risk_per_share = max(0, put_strike - prot_strike)
-        print(f"Max Downside Risk from Structure (excluding premiums): ${risk_per_share:.2f}/share")
+        if prot_put:
+            print(f"Protective Put: Buy Put ${prot_strike}")
+            # Max Risk Analysis
+            # Risk from Short Put is capped by Long Put
+            risk_per_share = max(0, put_strike - prot_strike)
+            print(f"Max Downside Risk from Structure (excluding premiums): ${risk_per_share:.2f}/share")
+        else:
+            print("Protective Put: None")
+            print(f"Max Downside Risk from Structure (excluding premiums): ${put_strike:.2f}/share (Stock -> 0)")
         
     # Construct Legs
     # 1. Buy Call
@@ -330,7 +347,7 @@ def main():
     })
     
     # 2. Sell Put (only if different from prot put)
-    if put_strike != prot_strike:
+    if not prot_put or put_strike != prot_strike:
         legs.append({
             "symbol": atm_put['symbol'],
             "side": "sell",
@@ -342,18 +359,19 @@ def main():
             print("Notice: ATM Put and Protective Put strikes are identical. Canceling Short Put leg.")
 
     # 3. Buy Protective Put
-    legs.append({
-        "symbol": prot_put['symbol'],
-        "side": "buy",
-        "position_intent": "buy_to_open",
-        "ratio_qty": 1
-    })
+    if prot_put:
+        legs.append({
+            "symbol": prot_put['symbol'],
+            "side": "buy",
+            "position_intent": "buy_to_open",
+            "ratio_qty": 1
+        })
     
     # If put_strike == prot_strike, we have Buy Call + Buy Put (Straddle/Strangle if strikes differ slightly, or just Married Put logic)
     # But here we specifically want Synthetic Long (Short Put + Long Call).
     # If protection is 0%, Short Put and Long Put cancel. We just buy the call.
     
-    if atm_put['symbol'] == prot_put['symbol']:
+    if prot_put and atm_put['symbol'] == prot_put['symbol']:
         # They cancel perfectly
         legs = [{
             "symbol": atm_call['symbol'],
@@ -442,7 +460,7 @@ def main():
             
             # Max Loss = (CallStrike - ProtStrike) + NetPremium
             # If standard structure: CallStrike == PutStrike
-            width = max(0, call_strike - prot_strike)
+            width = max(0, call_strike - prot_strike) # If prot_strike is 0 (no protection), width is call_strike (stock -> 0)
             metrics['max_loss'] = width + total_premium
             
             # Break Even = CallStrike + NetPremium
@@ -473,7 +491,10 @@ def main():
                 print("\n--- Financial Analysis (Per Share) ---")
                 print(f"Est. Net Premium: ${metrics['net_cost']:.2f} (Natural)")
                 print(f"Mid Net Premium:  ${metrics['net_mid_cost']:.2f}")
-                print(f"Max Loss Risk:    ${metrics['max_loss']:.2f} (Floor @ ${prot_strike:.2f})")
+                if prot_put:
+                    print(f"Max Loss Risk:    ${metrics['max_loss']:.2f} (Floor @ ${prot_strike:.2f})")
+                else:
+                    print(f"Max Loss Risk:    ${metrics['max_loss']:.2f} (No Floor)")
                 max_loss_ratio = metrics['max_loss'] / current_price if current_price > 0 else 0
                 print(f"Max Loss/Price:   {max_loss_ratio:.1%}")
                 if metrics['net_cost'] > 0:
@@ -481,7 +502,10 @@ def main():
                     print(f"Max Loss/Prem:    {loss_prem_ratio:.2f}x")
                 print(f"Break Even:       ${metrics['break_even']:.2f}")
                 print(f"Position Delta:   {metrics['net_delta']:.2f}")
-                print(f"Cap Efficiency:   Floor protection cost = ${(metrics['net_cost']):.2f} vs Stock Price ${current_price:.2f}")
+                if prot_put:
+                    print(f"Cap Efficiency:   Floor protection cost = ${metrics['net_cost']:.2f} vs Stock Price ${current_price:.2f}")
+                else:
+                    print(f"Cap Efficiency:   Synthetic cost = ${metrics['net_cost']:.2f} vs Stock Price ${current_price:.2f}")
                 print(f"Max Leg Spread:   {metrics['max_leg_spread']:.2%}")
 
             if warnings and not args.json:
