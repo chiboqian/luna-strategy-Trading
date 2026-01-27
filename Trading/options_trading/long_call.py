@@ -269,6 +269,7 @@ def main():
             print(json.dumps({"status": "executed", "order": response}, indent=2))
         else:
             print(f"Order Submitted: {response.get('id')}")
+            print(f"Purchase Price: ${price:.2f}")
             
     except Exception as e:
         err = {"error": str(e)}
