@@ -141,7 +141,7 @@ def analyze_results(directory: str, output_csv: str = None):
     # Monthly breakdown
     if 'close_date' in df.columns:
         lines.append("\n--- Monthly P&L ---")
-        df['month'] = df['close_date'].dt.to_period('M')
+        df['month'] = df['close_date'].dt.tz_localize(None).dt.to_period('M')
         monthly = df.groupby('month')['total_pnl'].sum()
         for period, pnl in monthly.items():
             lines.append(f"{period}: ${pnl:,.2f}")
