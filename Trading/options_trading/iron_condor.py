@@ -412,9 +412,11 @@ def main():
         if leg['side'] == 'sell':
             total_credit += bid
             mid_credit += mid
+            leg['estimated_price'] = bid
         else:
             total_credit -= ask
             mid_credit -= mid
+            leg['estimated_price'] = ask
             
     metrics['net_credit'] = total_credit
     metrics['mid_credit'] = mid_credit

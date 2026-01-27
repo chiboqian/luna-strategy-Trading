@@ -139,6 +139,7 @@ def main():
     legs = order.get('legs', [])
     quantity = float(order.get('quantity', 1))
     entry_cash_flow = float(order.get('entry_cash_flow', 0.0))
+    print(f"[DEBUG] Entry Cash Flow from Order: {entry_cash_flow}", file=sys.stderr)
     
     exit_cash_flow = 0.0
     leg_details = []
@@ -162,6 +163,8 @@ def main():
             mark = float(r.get(col_map['mark'], 0))
             last = float(r.get(col_map['last'], 0))
             
+            print(f"[DEBUG] {symbol} @ {args.date}: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
+            
             # Close Price Logic
             # Long (Buy) -> Sell at Bid
             # Short (Sell) -> Buy at Ask
@@ -174,6 +177,8 @@ def main():
                 print(f"Error: Found symbol {symbol} but valid close price is 0.0.", file=sys.stderr)
                 print(f"  Prices found: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
                 sys.exit(1)
+            
+            print(f"[DEBUG] {symbol} Close Price: {close_price} (Side: {side})", file=sys.stderr)
         
         # Calculate Cash Flow impact
         # Long leg: Selling gives +Cash
@@ -189,7 +194,13 @@ def main():
             "symbol": symbol,
             "side": side,
             "close_price": close_price,
-            "leg_cash_flow": leg_flow
+            "leg_cash_flow": leg_flow,
+            "market_data": {
+                "bid": bid,
+                "ask": ask,
+                "mark": mark,
+                "last": last
+            }
         })
 
     # Total PnL
@@ -218,6 +229,10 @@ def main():
     else:
         print(f"Close Date: {args.date}")
         print(f"Entry Cash Flow: ${entry_cash_flow:.2f}")
+        print("Leg Prices at Open:")
+        for leg in legs:
+            open_price = float(leg.get('estimated_price', 0.0))
+            print(f"  {leg.get('symbol')} ({leg.get('side')}): ${open_price:.2f}")
         print(f"Exit Cash Flow:  ${exit_cash_flow:.2f}")
         print("Leg Prices at Close:")
         for leg in leg_details:
