@@ -342,7 +342,7 @@ def main():
     
     result = {
         "order_id": order.get('id'),
-        "close_date": close_timestamp,
+        "close_date": str(close_timestamp),
         "close_reason": close_reason,
         "entry_cash_flow": entry_cash_flow,
         "exit_cash_flow": exit_cash_flow,
