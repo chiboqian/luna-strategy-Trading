@@ -378,9 +378,15 @@ def main():
             })
 
     # Total PnL
-    # Multiplier 100 for options
+    # Determine multiplier (100 for options, 1 for stocks)
+    multiplier = 100.0
+    if order.get('asset_class') == 'us_equity':
+        multiplier = 1.0
+    elif legs and len(legs[0]['symbol']) < 6: # Fallback heuristic for stock symbols
+        multiplier = 1.0
+
     unit_pnl = entry_cash_flow + exit_cash_flow
-    total_pnl = unit_pnl * quantity * 100
+    total_pnl = unit_pnl * quantity * multiplier
     
     result = {
         "order_id": order.get('id'),

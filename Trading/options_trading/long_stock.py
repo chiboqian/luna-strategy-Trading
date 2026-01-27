@@ -161,16 +161,18 @@ def main():
 
     # Execute
     try:
-        entry_cash_flow = -1 * exec_price * args.quantity
+        # Entry cash flow should be per-unit (per share) for consistency with closing logic
+        entry_cash_flow = -1 * exec_price
         
         # For mock client, we simulate the order placement since place_stock_order might not be mocked
         if isinstance(client, MockOptionClient):
             response = {
                 "id": "mock_stock_order",
                 "status": "filled",
+                "asset_class": "us_equity",
                 "filled_at": reference_date.isoformat(),
                 "symbol": symbol,
-                "qty": args.quantity,
+                "quantity": args.quantity,
                 "filled_avg_price": exec_price,
                 "side": "buy",
                 "legs": legs, # Include legs for close_mock_order compatibility
