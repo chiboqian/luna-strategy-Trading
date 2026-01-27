@@ -35,6 +35,7 @@ def analyze_results(directory: str, output_csv: str = None):
                 row = {
                     'file': f.name,
                     'close_date': d.get('close_date'),
+                    'close_reason': d.get('close_reason', 'N/A'),
                     'total_pnl': float(d.get('total_pnl', 0.0)),
                     'entry_cost': float(d.get('entry_cash_flow', 0.0)),
                     'exit_credit': float(d.get('exit_cash_flow', 0.0)),
@@ -66,18 +67,26 @@ def analyze_results(directory: str, output_csv: str = None):
     print(f"Saved summary CSV to: {out_path}")
     
     # Trade History
-    print("\n" + "="*55)
+    print("\n" + "="*90)
     print("Trade History")
-    print("="*55)
-    print(f"{'Date':<12} | {'Cost/Credit':>12} | {'P&L':>12} | {'%':>8} | {'Result':<6}")
-    print("-" * 66)
+    print("="*90)
+    print(f"{'Date':<19} | {'Cost/Credit':>12} | {'P&L':>12} | {'%':>8} | {'Result':<6} | {'Reason':<20}")
+    print("-" * 90)
     
     for _, row in df.iterrows():
-        date_str = row['close_date'].strftime('%Y-%m-%d') if pd.notnull(row['close_date']) else "N/A"
+        date_str = "N/A"
+        if pd.notnull(row['close_date']):
+            ts = row['close_date']
+            if ts.hour == 0 and ts.minute == 0 and ts.second == 0:
+                date_str = ts.strftime('%Y-%m-%d')
+            else:
+                date_str = ts.strftime('%Y-%m-%d %H:%M')
+        
         initial_cash = row['entry_cost'] * row['quantity'] * 100
         result = "WIN" if row['total_pnl'] > 0 else "LOSS" if row['total_pnl'] < 0 else "FLAT"
         pct = (row['total_pnl'] / abs(initial_cash)) * 100 if initial_cash != 0 else 0.0
-        print(f"{date_str:<12} | ${initial_cash:>11.2f} | ${row['total_pnl']:>11.2f} | {pct:>7.1f}% | {result:<6}")
+        reason = str(row.get('close_reason', 'N/A'))
+        print(f"{date_str:<19} | ${initial_cash:>11.2f} | ${row['total_pnl']:>11.2f} | {pct:>7.1f}% | {result:<6} | {reason:<20}")
 
     # Analysis
     total_trades = len(df)

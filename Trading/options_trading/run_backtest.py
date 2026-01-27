@@ -21,6 +21,14 @@ from pandas.tseries.offsets import CustomBusinessDay
 from pathlib import Path
 import shlex
 
+# Strategy Defaults (TP, SL)
+STRATEGY_DEFAULTS = {
+    "synthetic_long": {"tp": 0.5, "sl": 0.4},
+    "bull_put_spread": {"tp": 0.5, "sl": 1.0},
+    "iron_condor": {"tp": 0.5, "sl": 1.0},
+    "straddle": {"tp": 0.25, "sl": 0.15}
+}
+
 def get_backtest_schedule(start_date, end_date, hold_days=None, every_day=False):
     """
     Returns a list of (open_date, close_date) tuples.
@@ -93,6 +101,8 @@ def main():
     parser.add_argument("--hold-days", type=int, default=None, help="Number of business days to hold position (default: close on last day of week)")
     parser.add_argument("--entry-time", default="09:30:00", help="Time of entry (HH:MM:SS)")
     parser.add_argument("--exit-time", default="15:55:00", help="Time of exit (HH:MM:SS)")
+    parser.add_argument("--stop-loss", type=float, help="Stop Loss % (e.g. 0.5 for 50%)")
+    parser.add_argument("--take-profit", type=float, help="Take Profit % (e.g. 0.5 for 50%)")
     parser.add_argument("--every-day", action="store_true", help="Run backtest every trading day (instead of weekly)")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     
@@ -117,6 +127,14 @@ def main():
         
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Determine TP/SL defaults if not provided
+    defaults = STRATEGY_DEFAULTS.get(args.strategy, {})
+    tp_pct = args.take_profit if args.take_profit is not None else defaults.get("tp")
+    sl_pct = args.stop_loss if args.stop_loss is not None else defaults.get("sl")
+    
+    print(f"Strategy: {args.strategy}")
+    print(f"Management: TP={tp_pct}, SL={sl_pct}")
     
     # Generate Schedule
     print(f"Generating schedule from {args.start_date} to {args.end_date}...")
@@ -182,7 +200,8 @@ def main():
             with open(order_file, 'r') as f:
                 od = json.load(f)
                 qty = float(od.get('quantity', 0))
-                print(f"  ✅ Open: {od.get('id')} (Qty: {qty}, Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
+                filled_at = od.get('filled_at', open_str).replace('T', ' ')
+                print(f"  ✅ Open: {od.get('id')} @ {filled_at} (Qty: {qty}, Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
                 if qty == 0:
                     print(f"     ⚠️ Warning: Quantity is 0. Check --amount vs strategy risk.")
                     if res_open and res_open.stderr:
@@ -191,7 +210,8 @@ def main():
             pass
             
         # 2. Close Position
-        pnl_file = output_dir / f"pnl_{open_str_safe}_to_{close_str}.json"
+        close_str_safe = close_str.replace(" ", "_").replace(":", "")
+        pnl_file = output_dir / f"pnl_{open_str_safe}_to_{close_str_safe}.json"
         
         cmd_close = [
             sys.executable, str(close_script),
@@ -201,6 +221,14 @@ def main():
             "--output", str(pnl_file),
             "--json"
         ]
+        
+        # Pass management params
+        if tp_pct is not None:
+            cmd_close.extend(["--take-profit-pct", str(tp_pct)])
+        if sl_pct is not None:
+            cmd_close.extend(["--stop-loss-pct", str(sl_pct)])
+        # Pass begin time (entry time) to start monitoring immediately
+        cmd_close.extend(["--begin-time", open_str])
         
         res_close = run_command(cmd_close, args.verbose)
         
@@ -216,7 +244,9 @@ def main():
                 pnl_data = json.load(f)
                 total_pnl = pnl_data.get('total_pnl', 0.0)
                 qty = float(pnl_data.get('quantity', 0))
-                print(f"  ✅ P&L: ${total_pnl:.2f} (Qty: {qty})")
+                close_ts = pnl_data.get('close_date', close_str)
+                reason = pnl_data.get('close_reason', 'Exit Time')
+                print(f"  ✅ Close @ {close_ts} ({reason}) | P&L: ${total_pnl:.2f} (Qty: {qty})")
                 
                 if 'legs' in pnl_data:
                     for leg in pnl_data['legs']:

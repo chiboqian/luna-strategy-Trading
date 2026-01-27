@@ -21,7 +21,10 @@ def main():
     parser = argparse.ArgumentParser(description="Close Mock Order and Calculate P&L")
     parser.add_argument("--order", required=True, help="Path to mock order JSON file")
     parser.add_argument("--historical", required=True, help="Path to historical options data")
-    parser.add_argument("--date", required=True, help="Close date (YYYY-MM-DD)")
+    parser.add_argument("--date", required=True, help="Close date (YYYY-MM-DD) or datetime (YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--begin-time", help="Start time for monitoring (YYYY-MM-DD HH:MM:SS)")
+    parser.add_argument("--stop-loss-pct", type=float, help="Stop Loss percentage (e.g., 0.5 for 50%)")
+    parser.add_argument("--take-profit-pct", type=float, help="Take Profit percentage (e.g., 0.5 for 50%)")
     parser.add_argument("--output", help="Output JSON file path")
     parser.add_argument("--json", action="store_true", help="Print JSON to stdout")
     args = parser.parse_args()
@@ -78,6 +81,19 @@ def main():
         target_dt = datetime.strptime(args.date, "%Y-%m-%d")
         has_time = False
 
+    # Parse begin time if provided
+    begin_dt = None
+    if args.begin_time:
+        try:
+            begin_dt = datetime.strptime(args.begin_time, "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                begin_dt = datetime.strptime(args.begin_time, "%H:%M:%S")
+                # If only time provided, combine with target date
+                begin_dt = datetime.combine(target_dt.date(), begin_dt.time())
+            except ValueError:
+                pass
+
     # Filter Data
     if has_time:
         # Ensure datetime type
@@ -93,8 +109,17 @@ def main():
             if df[date_col].dt.tz is not None and target_dt.tzinfo is None:
                 compare_dt = pd.Timestamp(target_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
             
-            # Filter: Same day (start) <= time <= compare_dt
             start_dt = compare_dt.normalize()
+            if begin_dt:
+                if df[date_col].dt.tz is not None and begin_dt.tzinfo is None:
+                    # Assume begin_time is also ET if data is TZ aware
+                    start_dt = pd.Timestamp(begin_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
+                else:
+                    start_dt = begin_dt
+            
+            print(f"[DEBUG] Filtering data <= {compare_dt} (Timezone: {df[date_col].dt.tz})", file=sys.stderr)
+            
+            # Filter: start_dt <= time <= compare_dt
             day_df = df[(df[date_col] >= start_dt) & (df[date_col] <= compare_dt)].copy()
             day_df = day_df.sort_values(date_col)
         else:
@@ -131,10 +156,10 @@ def main():
     if 'price' in cols: col_map['last'] = 'price'
     if 'last_price' in cols: col_map['last'] = 'last_price'
     
-    # Deduplicate to keep latest snapshot per symbol (important for minute data)
-    if col_map['symbol'] in day_df.columns:
-        # Keep last occurrence (latest time)
-        day_df = day_df.drop_duplicates(subset=[col_map['symbol']], keep='last')
+    # If we are NOT stepping through prices (no SL/TP), we can deduplicate to just the last row per symbol
+    # But if we have SL/TP, we need the time series.
+    # For simplicity, let's keep the time series if SL/TP is requested, otherwise deduplicate.
+    use_step_logic = args.stop_loss_pct is not None or args.take_profit_pct is not None
 
     legs = order.get('legs', [])
     quantity = float(order.get('quantity', 1))
@@ -142,66 +167,169 @@ def main():
     print(f"[DEBUG] Entry Cash Flow from Order: {entry_cash_flow}", file=sys.stderr)
     
     exit_cash_flow = 0.0
+    close_reason = "Exit Time"
+    close_timestamp = args.date
     leg_details = []
     
-    for leg in legs:
-        symbol = leg['symbol']
-        side = leg['side'] # buy or sell
+    # Determine Strategy Type (Credit vs Debit) for PnL % calculation
+    # Entry Cash Flow > 0 => Credit Strategy (Max Profit = Entry Credit)
+    # Entry Cash Flow < 0 => Debit Strategy (Cost = -Entry Cash Flow)
+    is_credit_strategy = entry_cash_flow > 0
+    initial_basis = abs(entry_cash_flow) if entry_cash_flow != 0 else 1.0 # Avoid div by zero
+
+    if use_step_logic:
+        # Step through time
+        timestamps = day_df[date_col].unique()
+        triggered = False
         
-        # Find row
-        row = day_df[day_df[col_map['symbol']] == symbol]
+        # Cache symbol rows to avoid repeated filtering
+        symbol_data = {}
+        for leg in legs:
+            sym = leg['symbol']
+            symbol_data[sym] = day_df[day_df[col_map['symbol']] == sym].set_index(date_col)
+
+        for ts in timestamps:
+            current_exit_cash_flow = 0.0
+            temp_leg_details = []
+            valid_step = True
+            
+            for leg in legs:
+                sym = leg['symbol']
+                side = leg['side']
+                
+                # Get row for this timestamp (or nearest previous? For now, exact match or skip)
+                # Using asof could be better but let's try exact match first for aligned data
+                if ts in symbol_data[sym].index:
+                    # Handle duplicate timestamps if any (take last)
+                    r = symbol_data[sym].loc[ts]
+                    if isinstance(r, pd.DataFrame):
+                        r = r.iloc[-1]
+                else:
+                    # If data is missing for this leg at this minute, we can't calculate total PnL accurately
+                    # Skip this timestamp
+                    valid_step = False
+                    break
+                
+                bid = float(r.get(col_map['bid'], 0))
+                ask = float(r.get(col_map['ask'], 0))
+                mark = float(r.get(col_map['mark'], 0))
+                last = float(r.get(col_map['last'], 0))
+                
+                if side == 'buy':
+                    price = bid if bid > 0 else mark if mark > 0 else last
+                    leg_flow = price
+                else:
+                    price = ask if ask > 0 else mark if mark > 0 else last
+                    leg_flow = -price
+                
+                current_exit_cash_flow += leg_flow
+                temp_leg_details.append({
+                    "symbol": sym, "side": side, "close_price": price, "leg_cash_flow": leg_flow,
+                    "market_data": {"bid": bid, "ask": ask, "mark": mark, "last": last}
+                })
+            
+            if not valid_step:
+                continue
+                
+            # Calculate PnL
+            # Unit PnL = Entry + Exit
+            unit_pnl = entry_cash_flow + current_exit_cash_flow
+            
+            # Check Triggers
+            # PnL % = Unit PnL / Initial Basis
+            # For Credit: Profit is positive PnL. Max Profit = Initial Basis.
+            # For Debit: Profit is positive PnL. Cost = Initial Basis.
+            
+            pnl_pct = unit_pnl / initial_basis
+            
+            # Take Profit
+            if args.take_profit_pct and pnl_pct >= args.take_profit_pct:
+                triggered = True
+                close_reason = f"Take Profit ({pnl_pct:.1%})"
+            
+            # Stop Loss
+            # Stop loss is usually defined as losing X% of the basis.
+            # So PnL % <= -X%
+            elif args.stop_loss_pct and pnl_pct <= -args.stop_loss_pct:
+                triggered = True
+                close_reason = f"Stop Loss ({pnl_pct:.1%})"
+            
+            if triggered:
+                exit_cash_flow = current_exit_cash_flow
+                leg_details = temp_leg_details
+                close_timestamp = str(ts)
+                break
         
-        if row.empty:
-            available = day_df[col_map['symbol']].unique()[:10]
-            print(f"Error: Symbol {symbol} not found in data for {args.date}.", file=sys.stderr)
-            print(f"Available symbols (first 10): {available}", file=sys.stderr)
-            sys.exit(1)
-        else:
-            r = row.iloc[0]
-            bid = float(r.get(col_map['bid'], 0))
-            ask = float(r.get(col_map['ask'], 0))
-            mark = float(r.get(col_map['mark'], 0))
-            last = float(r.get(col_map['last'], 0))
-            
-            print(f"[DEBUG] {symbol} @ {args.date}: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
-            
-            # Close Price Logic
-            # Long (Buy) -> Sell at Bid
-            # Short (Sell) -> Buy at Ask
-            if side == 'buy':
-                close_price = bid if bid > 0 else mark if mark > 0 else last
+        if not triggered:
+            # If loop finishes without trigger, use the last calculated values (End of Day/Period)
+            # We need to ensure we have values. If loop never ran validly, we fall back to non-step logic
+            if temp_leg_details:
+                exit_cash_flow = current_exit_cash_flow
+                leg_details = temp_leg_details
+                close_timestamp = str(timestamps[-1])
             else:
-                close_price = ask if ask > 0 else mark if mark > 0 else last
+                # Fallback if no valid timestamps found
+                use_step_logic = False
+
+    if not use_step_logic:
+        # Standard logic: Take last available price in the window
+        if col_map['symbol'] in day_df.columns:
+            day_df = day_df.drop_duplicates(subset=[col_map['symbol']], keep='last')
             
-            if close_price <= 0:
-                print(f"Error: Found symbol {symbol} but valid close price is 0.0.", file=sys.stderr)
-                print(f"  Prices found: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
+        for leg in legs:
+            symbol = leg['symbol']
+            side = leg['side'] # buy or sell
+            
+            # Find row
+            row = day_df[day_df[col_map['symbol']] == symbol]
+            
+            if row.empty:
+                available = day_df[col_map['symbol']].unique()[:10]
+                print(f"Error: Symbol {symbol} not found in data for {args.date}.", file=sys.stderr)
+                print(f"Available symbols (first 10): {available}", file=sys.stderr)
                 sys.exit(1)
+            else:
+                r = row.iloc[0]
+                bid = float(r.get(col_map['bid'], 0))
+                ask = float(r.get(col_map['ask'], 0))
+                mark = float(r.get(col_map['mark'], 0))
+                last = float(r.get(col_map['last'], 0))
+                
+                print(f"[DEBUG] {symbol} @ {args.date}: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
+                
+                # Close Price Logic
+                if side == 'buy':
+                    close_price = bid if bid > 0 else mark if mark > 0 else last
+                else:
+                    close_price = ask if ask > 0 else mark if mark > 0 else last
+                
+                if close_price <= 0:
+                    print(f"Error: Found symbol {symbol} but valid close price is 0.0.", file=sys.stderr)
+                    print(f"  Prices found: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
+                    sys.exit(1)
+                
+                print(f"[DEBUG] {symbol} Close Price: {close_price} (Side: {side})", file=sys.stderr)
             
-            print(f"[DEBUG] {symbol} Close Price: {close_price} (Side: {side})", file=sys.stderr)
-        
-        # Calculate Cash Flow impact
-        # Long leg: Selling gives +Cash
-        # Short leg: Buying costs -Cash
-        if side == 'buy':
-            leg_flow = close_price
-        else:
-            leg_flow = -close_price
+            # Calculate Cash Flow impact
+            if side == 'buy':
+                leg_flow = close_price
+            else:
+                leg_flow = -close_price
+                
+            exit_cash_flow += leg_flow
             
-        exit_cash_flow += leg_flow
-        
-        leg_details.append({
-            "symbol": symbol,
-            "side": side,
-            "close_price": close_price,
-            "leg_cash_flow": leg_flow,
-            "market_data": {
-                "bid": bid,
-                "ask": ask,
-                "mark": mark,
-                "last": last
-            }
-        })
+            leg_details.append({
+                "symbol": symbol,
+                "side": side,
+                "close_price": close_price,
+                "leg_cash_flow": leg_flow,
+                "market_data": {
+                    "bid": bid,
+                    "ask": ask,
+                    "mark": mark,
+                    "last": last
+                }
+            })
 
     # Total PnL
     # Multiplier 100 for options
@@ -210,7 +338,8 @@ def main():
     
     result = {
         "order_id": order.get('id'),
-        "close_date": args.date,
+        "close_date": close_timestamp,
+        "close_reason": close_reason,
         "entry_cash_flow": entry_cash_flow,
         "exit_cash_flow": exit_cash_flow,
         "unit_pnl": unit_pnl,
@@ -227,7 +356,7 @@ def main():
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print(f"Close Date: {args.date}")
+        print(f"Close Date: {close_timestamp} ({close_reason})")
         print(f"Entry Cash Flow: ${entry_cash_flow:.2f}")
         print("Leg Prices at Open:")
         for leg in legs:

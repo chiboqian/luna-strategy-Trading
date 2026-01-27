@@ -171,10 +171,50 @@ class IBKRClient:
         
         # TWS expects TIF (Time in Force). Default DAY.
         order.tif = "DAY"
+        order.eTradeOnly = False
+        order.firmQuoteOnly = False
 
         oid = self.app.next_order_id
         self.app.placeOrder(oid, contract, order)
         print(f"✅ Placed {action} order for {qty} {symbol} (Order ID: {oid})")
+        
+        # Increment local order ID for subsequent calls
+        self.app.next_order_id += 1
+        
+        # Give it a moment to propagate
+        time.sleep(1)
+
+    def place_option_order(self, symbol, action, qty, expiration, strike, right, order_type="MKT", price=None, exchange="SMART", currency="USD"):
+        """Place an option order."""
+        if not self.app.next_order_id:
+            print("❌ No valid Order ID received.")
+            return
+
+        contract = Contract()
+        contract.symbol = symbol.upper()
+        contract.secType = "OPT"
+        contract.exchange = exchange
+        contract.currency = currency
+        contract.lastTradeDateOrContractMonth = expiration
+        contract.strike = float(strike)
+        contract.right = right.upper()
+        contract.multiplier = "100"
+
+        order = Order()
+        order.action = action.upper()
+        order.totalQuantity = float(qty)
+        order.orderType = order_type.upper()
+        if price:
+            order.lmtPrice = float(price)
+        
+        # TWS expects TIF (Time in Force). Default DAY.
+        order.tif = "DAY"
+        order.eTradeOnly = False
+        order.firmQuoteOnly = False
+
+        oid = self.app.next_order_id
+        self.app.placeOrder(oid, contract, order)
+        print(f"✅ Placed {action} order for {qty} {symbol} {expiration} {strike} {right} (Order ID: {oid})")
         
         # Increment local order ID for subsequent calls
         self.app.next_order_id += 1
@@ -274,6 +314,9 @@ def cmd_buy(client, args):
 def cmd_sell(client, args):
     client.place_order(args.symbol, "SELL", args.quantity, args.type, args.price)
 
+def cmd_buy_call(client, args):
+    client.place_option_order(args.symbol, "BUY", args.quantity, args.expiration, args.strike, "C", args.type, args.price)
+
 def cmd_orders(client, args):
     orders = client.get_open_orders()
     if not orders:
@@ -352,6 +395,16 @@ def main():
     p_sell.add_argument("--price", type=float, help="Limit price (required for LMT)")
     p_sell.set_defaults(func=cmd_sell)
 
+    # Buy Call Command
+    p_buy_call = subparsers.add_parser("buy-call", help="Place a buy call option order")
+    p_buy_call.add_argument("symbol", help="Underlying symbol (e.g., AAPL)")
+    p_buy_call.add_argument("quantity", type=float, help="Number of contracts")
+    p_buy_call.add_argument("expiration", help="Expiration date (YYYYMMDD)")
+    p_buy_call.add_argument("strike", type=float, help="Strike price")
+    p_buy_call.add_argument("--type", default="MKT", choices=["MKT", "LMT"], help="Order type: Market or Limit")
+    p_buy_call.add_argument("--price", type=float, help="Limit price (required for LMT)")
+    p_buy_call.set_defaults(func=cmd_buy_call)
+
     # Orders Command
     p_orders = subparsers.add_parser("orders", help="List all open orders")
     p_orders.set_defaults(func=cmd_orders)
@@ -381,7 +434,7 @@ def main():
         sys.exit(1)
 
     # Validation
-    if (args.command in ["buy", "sell"]) and args.type == "LMT" and not args.price:
+    if (args.command in ["buy", "sell", "buy-call"]) and args.type == "LMT" and not args.price:
         print("❌ Error: --price is required for LMT orders.", file=sys.stderr)
         sys.exit(1)
 
