@@ -179,57 +179,62 @@ def main():
 
     if use_step_logic:
         # Step through time
-        timestamps = day_df[date_col].unique()
-        triggered = False
+        # Filter for relevant symbols only to speed up iteration
+        relevant_symbols = [leg['symbol'] for leg in legs]
+        step_df = day_df[day_df[col_map['symbol']].isin(relevant_symbols)].copy()
+        step_df = step_df.sort_values(date_col)
         
-        # Cache symbol rows to avoid repeated filtering
-        symbol_data = {}
-        for leg in legs:
-            sym = leg['symbol']
-            symbol_data[sym] = day_df[day_df[col_map['symbol']] == sym].set_index(date_col)
+        triggered = False
+        last_known_prices = {} # {symbol: {price_data}}
+        
+        # Iterate through every row (tick/bar) in chronological order
+        for idx, row in step_df.iterrows():
+            ts = row[date_col]
+            sym = row[col_map['symbol']]
+            
+            # Update price data for this symbol
+            bid = float(row.get(col_map['bid'], 0))
+            ask = float(row.get(col_map['ask'], 0))
+            mark = float(row.get(col_map['mark'], 0))
+            last = float(row.get(col_map['last'], 0))
+            
+            last_known_prices[sym] = {
+                'bid': bid,
+                'ask': ask,
+                'mark': mark,
+                'last': last,
+                'ts': ts
+            }
+            
+            # Check if we have prices for all legs to calculate PnL
+            # (Optimization: We could check this only if we have at least one price for every leg)
+            if len(last_known_prices) < len(legs):
+                continue
+                
+            # Check if we have all specific symbols needed (in case of duplicates/supersets)
+            if not all(leg['symbol'] in last_known_prices for leg in legs):
+                continue
 
-        for ts in timestamps:
             current_exit_cash_flow = 0.0
             temp_leg_details = []
-            valid_step = True
             
             for leg in legs:
                 sym = leg['symbol']
                 side = leg['side']
-                
-                # Get row for this timestamp (or nearest previous? For now, exact match or skip)
-                # Using asof could be better but let's try exact match first for aligned data
-                if ts in symbol_data[sym].index:
-                    # Handle duplicate timestamps if any (take last)
-                    r = symbol_data[sym].loc[ts]
-                    if isinstance(r, pd.DataFrame):
-                        r = r.iloc[-1]
-                else:
-                    # If data is missing for this leg at this minute, we can't calculate total PnL accurately
-                    # Skip this timestamp
-                    valid_step = False
-                    break
-                
-                bid = float(r.get(col_map['bid'], 0))
-                ask = float(r.get(col_map['ask'], 0))
-                mark = float(r.get(col_map['mark'], 0))
-                last = float(r.get(col_map['last'], 0))
+                prices = last_known_prices[sym]
                 
                 if side == 'buy':
-                    price = bid if bid > 0 else mark if mark > 0 else last
+                    price = prices['bid'] if prices['bid'] > 0 else prices['mark'] if prices['mark'] > 0 else prices['last']
                     leg_flow = price
                 else:
-                    price = ask if ask > 0 else mark if mark > 0 else last
+                    price = prices['ask'] if prices['ask'] > 0 else prices['mark'] if prices['mark'] > 0 else prices['last']
                     leg_flow = -price
                 
                 current_exit_cash_flow += leg_flow
                 temp_leg_details.append({
                     "symbol": sym, "side": side, "close_price": price, "leg_cash_flow": leg_flow,
-                    "market_data": {"bid": bid, "ask": ask, "mark": mark, "last": last}
+                    "market_data": prices
                 })
-            
-            if not valid_step:
-                continue
                 
             # Calculate PnL
             # Unit PnL = Entry + Exit
@@ -261,12 +266,11 @@ def main():
                 break
         
         if not triggered:
-            # If loop finishes without trigger, use the last calculated values (End of Day/Period)
-            # We need to ensure we have values. If loop never ran validly, we fall back to non-step logic
+            # If loop finishes without trigger, use the last calculated values from the loop
             if temp_leg_details:
                 exit_cash_flow = current_exit_cash_flow
                 leg_details = temp_leg_details
-                close_timestamp = str(timestamps[-1])
+                # close_timestamp is already set to args.date (exit time) by default
             else:
                 # Fallback if no valid timestamps found
                 use_step_logic = False
