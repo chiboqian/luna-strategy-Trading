@@ -39,12 +39,13 @@ def main():
         path_input = Path(args.historical)
         if path_input.is_dir():
             # New structure: folder -> year -> date.parquet
-            year_str = args.date.split('-')[0]
-            file_path = path_input / year_str / f"{args.date}.parquet"
+            date_part = args.date.split(' ')[0]
+            year_str = date_part.split('-')[0]
+            file_path = path_input / year_str / f"{date_part}.parquet"
             
             # Check for Databento format
             if not file_path.exists():
-                dbn_date = args.date.replace('-', '')
+                dbn_date = date_part.replace('-', '')
                 file_path = path_input / f"{dbn_date}.dbn.zst"
             
             if not file_path.exists():
