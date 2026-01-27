@@ -228,6 +228,9 @@ def main():
             "--json"
         ]
         
+        if args.underlying:
+            cmd_close.extend(["--underlying", args.underlying])
+        
         # Pass management params
         if tp_pct is not None:
             cmd_close.extend(["--take-profit-pct", str(tp_pct)])

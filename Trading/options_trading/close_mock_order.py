@@ -21,6 +21,7 @@ def main():
     parser = argparse.ArgumentParser(description="Close Mock Order and Calculate P&L")
     parser.add_argument("--order", required=True, help="Path to mock order JSON file")
     parser.add_argument("--historical", required=True, help="Path to historical options data")
+    parser.add_argument("--underlying", help="Path to underlying data (optional)")
     parser.add_argument("--date", required=True, help="Close date (YYYY-MM-DD) or datetime (YYYY-MM-DD HH:MM:SS)")
     parser.add_argument("--begin-time", help="Start time for monitoring (YYYY-MM-DD HH:MM:SS)")
     parser.add_argument("--stop-loss-pct", type=float, help="Stop Loss percentage (e.g., 0.5 for 50%)")
@@ -37,9 +38,8 @@ def main():
         print(f"Error loading order file: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Load data
-    try:
-        path_input = Path(args.historical)
+    def load_data_source(path_str, date_str, begin_time_str=None):
+        path_input = Path(path_str)
         if path_input.is_dir():
             # New structure: folder -> year -> date.parquet
             date_part = args.date.split(' ')[0]
@@ -63,71 +63,79 @@ def main():
                 df = pd.read_parquet(file_path)
         else:
             df = pd.read_parquet(args.historical)
+        
+        # Identify Date Column
+        date_col = next((c for c in ['date', 'quote_date', 'timestamp', 'time', 'ts_event'] if c in df.columns), None)
+        if not date_col:
+            raise ValueError(f"No date column found in {path_str}")
+            
+        # Parse target date
+        try:
+            target_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
+            has_time = True
+        except ValueError:
+            target_dt = datetime.strptime(date_str, "%Y-%m-%d")
+            has_time = False
+
+        # Parse begin time
+        begin_dt = None
+        if begin_time_str:
+            try:
+                begin_dt = datetime.strptime(begin_time_str, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                try:
+                    begin_dt = datetime.strptime(begin_time_str, "%H:%M:%S")
+                    begin_dt = datetime.combine(target_dt.date(), begin_dt.time())
+                except ValueError:
+                    pass
+
+        # Filter Data
+        if has_time:
+            if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                try:
+                    df[date_col] = pd.to_datetime(df[date_col])
+                except Exception:
+                    pass
+
+            if pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                compare_dt = target_dt
+                if df[date_col].dt.tz is not None and target_dt.tzinfo is None:
+                    compare_dt = pd.Timestamp(target_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
+                
+                start_dt = compare_dt.normalize()
+                if begin_dt:
+                    if df[date_col].dt.tz is not None and begin_dt.tzinfo is None:
+                        start_dt = pd.Timestamp(begin_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
+                    else:
+                        start_dt = begin_dt
+                
+                day_df = df[(df[date_col] >= start_dt) & (df[date_col] <= compare_dt)].copy()
+                day_df = day_df.sort_values(date_col)
+            else:
+                day_df = df[df[date_col].astype(str).str.startswith(date_str.split()[0])].copy()
+        else:
+            if pd.api.types.is_datetime64_any_dtype(df[date_col]):
+                df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
+            day_df = df[df[date_col].astype(str).str.startswith(date_str)].copy()
+            
+        return day_df, date_col
+
+    # Load Primary Data (Options)
+    try:
+        day_df, date_col = load_data_source(args.historical, args.date, args.begin_time)
     except Exception as e:
-        print(f"Error loading parquet file: {e}", file=sys.stderr)
-        sys.exit(1)
-    
-    # Identify Date Column
-    date_col = next((c for c in ['date', 'quote_date', 'timestamp', 'time', 'ts_event'] if c in df.columns), None)
-    if not date_col:
-        print("Error: No date column in parquet", file=sys.stderr)
+        print(f"Error loading historical file: {e}", file=sys.stderr)
         sys.exit(1)
         
-    # Parse target date to check for time component
-    try:
-        target_dt = datetime.strptime(args.date, "%Y-%m-%d %H:%M:%S")
-        has_time = True
-    except ValueError:
-        target_dt = datetime.strptime(args.date, "%Y-%m-%d")
-        has_time = False
-
-    # Parse begin time if provided
-    begin_dt = None
-    if args.begin_time:
+    # Load Underlying Data (Optional)
+    underlying_df = None
+    underlying_date_col = None
+    if args.underlying:
         try:
-            begin_dt = datetime.strptime(args.begin_time, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            try:
-                begin_dt = datetime.strptime(args.begin_time, "%H:%M:%S")
-                # If only time provided, combine with target date
-                begin_dt = datetime.combine(target_dt.date(), begin_dt.time())
-            except ValueError:
-                pass
-
-    # Filter Data
-    if has_time:
-        # Ensure datetime type
-        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
-            try:
-                df[date_col] = pd.to_datetime(df[date_col])
-            except Exception:
-                pass # Fallback to string matching if conversion fails
-
-        if pd.api.types.is_datetime64_any_dtype(df[date_col]):
-            # Handle Timezone (assume input is ET if data is TZ-aware)
-            compare_dt = target_dt
-            if df[date_col].dt.tz is not None and target_dt.tzinfo is None:
-                compare_dt = pd.Timestamp(target_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
-            
-            start_dt = compare_dt.normalize()
-            if begin_dt:
-                if df[date_col].dt.tz is not None and begin_dt.tzinfo is None:
-                    # Assume begin_time is also ET if data is TZ aware
-                    start_dt = pd.Timestamp(begin_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
-                else:
-                    start_dt = begin_dt
-            
-            print(f"[DEBUG] Filtering data <= {compare_dt} (Timezone: {df[date_col].dt.tz})", file=sys.stderr)
-            
-            # Filter: start_dt <= time <= compare_dt
-            day_df = df[(df[date_col] >= start_dt) & (df[date_col] <= compare_dt)].copy()
-            day_df = day_df.sort_values(date_col)
-        else:
-            day_df = df[df[date_col].astype(str).str.startswith(args.date.split()[0])].copy()
-    else:
-        if pd.api.types.is_datetime64_any_dtype(df[date_col]):
-            df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
-        day_df = df[df[date_col].astype(str).str.startswith(args.date)].copy()
+            underlying_df, underlying_date_col = load_data_source(args.underlying, args.date, args.begin_time)
+            print(f"Loaded underlying data: {len(underlying_df)} rows", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Error loading underlying file: {e}", file=sys.stderr)
     
     if day_df.empty:
         print(f"Error: No data found for date {args.date}", file=sys.stderr)
@@ -156,10 +164,24 @@ def main():
     if 'price' in cols: col_map['last'] = 'price'
     if 'last_price' in cols: col_map['last'] = 'last_price'
     
+    # Underlying columns
+    u_col_map = col_map.copy()
+    if underlying_df is not None:
+        u_cols = underlying_df.columns
+        if 'bid_px_00' in u_cols: u_col_map['bid'] = 'bid_px_00'
+        if 'ask_px_00' in u_cols: u_col_map['ask'] = 'ask_px_00'
+        if 'price' in u_cols: u_col_map['last'] = 'price'
+        if 'last_price' in u_cols: u_col_map['last'] = 'last_price'
+        if 'symbol' in u_cols: u_col_map['symbol'] = 'symbol'
+    
     # If we are NOT stepping through prices (no SL/TP), we can deduplicate to just the last row per symbol
     # But if we have SL/TP, we need the time series.
     # For simplicity, let's keep the time series if SL/TP is requested, otherwise deduplicate.
     use_step_logic = args.stop_loss_pct is not None or args.take_profit_pct is not None
+    
+    # Combine data sources for step logic if needed?
+    # For now, we'll check underlying_df if symbol not found in day_df
+    # Note: step logic currently iterates day_df. If symbol is in underlying, we need to iterate that too.
 
     legs = order.get('legs', [])
     quantity = float(order.get('quantity', 1))
@@ -181,8 +203,17 @@ def main():
         # Step through time
         # Filter for relevant symbols only to speed up iteration
         relevant_symbols = [leg['symbol'] for leg in legs]
-        step_df = day_df[day_df[col_map['symbol']].isin(relevant_symbols)].copy()
-        step_df = step_df.sort_values(date_col)
+        
+        # Check if symbols are in day_df or underlying_df
+        df_subset = day_df[day_df[col_map['symbol']].isin(relevant_symbols)].copy()
+        if underlying_df is not None:
+            u_subset = underlying_df[underlying_df[u_col_map['symbol']].isin(relevant_symbols)].copy()
+            # Rename date col to match if needed
+            if underlying_date_col != date_col:
+                u_subset = u_subset.rename(columns={underlying_date_col: date_col})
+            step_df = pd.concat([df_subset, u_subset]).sort_values(date_col)
+        else:
+            step_df = df_subset.sort_values(date_col)
         
         triggered = False
         last_known_prices = {} # {symbol: {price_data}}
@@ -192,11 +223,15 @@ def main():
             ts = row[date_col]
             sym = row[col_map['symbol']]
             
+            # Determine which map to use (is it from underlying or options?)
+            # Simple heuristic: check columns
+            curr_map = u_col_map if (underlying_df is not None and sym in underlying_df[u_col_map['symbol']].values) else col_map
+            
             # Update price data for this symbol
-            bid = float(row.get(col_map['bid'], 0))
-            ask = float(row.get(col_map['ask'], 0))
-            mark = float(row.get(col_map['mark'], 0))
-            last = float(row.get(col_map['last'], 0))
+            bid = float(row.get(curr_map['bid'], 0))
+            ask = float(row.get(curr_map['ask'], 0))
+            mark = float(row.get(curr_map['mark'], 0))
+            last = float(row.get(curr_map['last'], 0))
             
             last_known_prices[sym] = {
                 'bid': bid,
@@ -284,8 +319,15 @@ def main():
             symbol = leg['symbol']
             side = leg['side'] # buy or sell
             
-            # Find row
+            # Find row in options data
             row = day_df[day_df[col_map['symbol']] == symbol]
+            curr_map = col_map
+            
+            if row.empty:
+                # Check underlying
+                if underlying_df is not None:
+                    row = underlying_df[underlying_df[u_col_map['symbol']] == symbol]
+                    curr_map = u_col_map
             
             if row.empty:
                 available = day_df[col_map['symbol']].unique()[:10]
@@ -294,10 +336,10 @@ def main():
                 sys.exit(1)
             else:
                 r = row.iloc[0]
-                bid = float(r.get(col_map['bid'], 0))
-                ask = float(r.get(col_map['ask'], 0))
-                mark = float(r.get(col_map['mark'], 0))
-                last = float(r.get(col_map['last'], 0))
+                bid = float(r.get(curr_map['bid'], 0))
+                ask = float(r.get(curr_map['ask'], 0))
+                mark = float(r.get(curr_map['mark'], 0))
+                last = float(r.get(curr_map['last'], 0))
                 
                 print(f"[DEBUG] {symbol} @ {args.date}: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
                 
