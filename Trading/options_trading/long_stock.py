@@ -84,8 +84,11 @@ def main():
     else:
         reference_date = datetime.now()
 
-    if args.historical:
-        client = MockOptionClient(args.historical, reference_date, args.save_order, args.underlying)
+    mock_file = args.historical or args.underlying
+    if mock_file:
+        primary_file = args.historical if args.historical else args.underlying
+        secondary_file = args.underlying if args.historical else None
+        client = MockOptionClient(primary_file, reference_date, args.save_order, secondary_file)
     else:
         client = AlpacaClient()
 

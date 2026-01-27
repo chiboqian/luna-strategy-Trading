@@ -63,6 +63,10 @@ class MockOptionClient:
         if 'underlying_price' in cols: self.col_map['underlying'] = 'underlying_price'
         elif 'underlying_last' in cols: self.col_map['underlying'] = 'underlying_last'
         elif 'spot' in cols: self.col_map['underlying'] = 'spot'
+        elif 'price' in cols: self.col_map['underlying'] = 'price'
+        elif 'last' in cols: self.col_map['underlying'] = 'last'
+        elif 'close' in cols: self.col_map['underlying'] = 'close'
+        elif 'mark' in cols: self.col_map['underlying'] = 'mark'
         
         if 'strike_price' in cols: self.col_map['strike'] = 'strike_price'
         if 'expiration_date' in cols: self.col_map['expiration'] = 'expiration_date'
@@ -327,6 +331,23 @@ class MockOptionClient:
                 elif 'ask' in row: ap = float(row['ask'])
                 
                 return {'bp': bp, 'ap': ap}
+        
+        # Check self.df (if it contains stock data)
+        if self.df is not None and not self.df.empty:
+             subset = self.df
+             if 'symbol' in self.df.columns:
+                 subset = self.df[self.df['symbol'] == symbol]
+             
+             if not subset.empty:
+                row = subset.iloc[-1]
+                bp = 0.0
+                ap = 0.0
+                if 'bid_px_00' in row: bp = float(row['bid_px_00'])
+                elif 'bid' in row: bp = float(row['bid'])
+                if 'ask_px_00' in row: ap = float(row['ask_px_00'])
+                elif 'ask' in row: ap = float(row['ask'])
+                return {'bp': bp, 'ap': ap}
+
         return {}
 
     def get_stock_snapshot(self, symbol: str):
