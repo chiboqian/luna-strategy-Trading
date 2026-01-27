@@ -181,7 +181,10 @@ def main():
         try:
             with open(order_file, 'r') as f:
                 od = json.load(f)
-                print(f"  ✅ Open: {od.get('id')} (Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
+                qty = float(od.get('quantity', 0))
+                print(f"  ✅ Open: {od.get('id')} (Qty: {qty}, Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
+                if qty == 0:
+                    print(f"     ⚠️ Warning: Quantity is 0. Check --amount vs strategy risk.")
         except:
             pass
             
@@ -210,7 +213,8 @@ def main():
             with open(pnl_file, 'r') as f:
                 pnl_data = json.load(f)
                 total_pnl = pnl_data.get('total_pnl', 0.0)
-                print(f"  ✅ P&L: ${total_pnl:.2f}")
+                qty = float(pnl_data.get('quantity', 0))
+                print(f"  ✅ P&L: ${total_pnl:.2f} (Qty: {qty})")
                 
                 if 'legs' in pnl_data:
                     for leg in pnl_data['legs']:
