@@ -176,6 +176,14 @@ def main():
         if not order_file.exists():
             print(f"  ❌ Order file not created for {open_str}")
             continue
+        
+        # Debug: Print entry info
+        try:
+            with open(order_file, 'r') as f:
+                od = json.load(f)
+                print(f"  ✅ Open: {od.get('id')} (Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
+        except:
+            pass
             
         # 2. Close Position
         pnl_file = output_dir / f"pnl_{open_str_safe}_to_{close_str}.json"

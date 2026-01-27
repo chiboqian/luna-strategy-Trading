@@ -128,6 +128,8 @@ def main():
     # Databento mapping
     if 'bid_px_00' in cols: col_map['bid'] = 'bid_px_00'
     if 'ask_px_00' in cols: col_map['ask'] = 'ask_px_00'
+    if 'price' in cols: col_map['last'] = 'price'
+    if 'last_price' in cols: col_map['last'] = 'last_price'
     
     # Deduplicate to keep latest snapshot per symbol (important for minute data)
     if col_map['symbol'] in day_df.columns:
@@ -167,6 +169,11 @@ def main():
                 close_price = bid if bid > 0 else mark if mark > 0 else last
             else:
                 close_price = ask if ask > 0 else mark if mark > 0 else last
+            
+            if close_price <= 0:
+                print(f"Error: Found symbol {symbol} but valid close price is 0.0.", file=sys.stderr)
+                print(f"  Prices found: Bid={bid}, Ask={ask}, Mark={mark}, Last={last}", file=sys.stderr)
+                sys.exit(1)
         
         # Calculate Cash Flow impact
         # Long leg: Selling gives +Cash
