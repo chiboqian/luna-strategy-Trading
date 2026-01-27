@@ -83,7 +83,12 @@ def main():
     # Setup paths
     base_dir = Path(__file__).parent
     strategy_script = base_dir / f"{args.strategy}.py"
+    if not strategy_script.exists():
+        strategy_script = base_dir / "options" / f"{args.strategy}.py"
+
     close_script = base_dir / "close_mock_order.py"
+    if not close_script.exists():
+        close_script = base_dir / "options" / "close_mock_order.py"
     
     if not strategy_script.exists():
         print(f"Error: Strategy script {strategy_script} not found.", file=sys.stderr)
