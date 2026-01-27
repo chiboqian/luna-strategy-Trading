@@ -20,7 +20,7 @@ except ImportError:
 def main():
     parser = argparse.ArgumentParser(description="Close Mock Order and Calculate P&L")
     parser.add_argument("--order", required=True, help="Path to mock order JSON file")
-    parser.add_argument("--parquet", required=True, help="Path to historical options parquet")
+    parser.add_argument("--historical", required=True, help="Path to historical options data")
     parser.add_argument("--date", required=True, help="Close date (YYYY-MM-DD)")
     parser.add_argument("--output", help="Output JSON file path")
     parser.add_argument("--json", action="store_true", help="Print JSON to stdout")
@@ -36,7 +36,7 @@ def main():
 
     # Load data
     try:
-        path_input = Path(args.parquet)
+        path_input = Path(args.historical)
         if path_input.is_dir():
             # New structure: folder -> year -> date.parquet
             year_str = args.date.split('-')[0]
@@ -58,7 +58,7 @@ def main():
             else:
                 df = pd.read_parquet(file_path)
         else:
-            df = pd.read_parquet(args.parquet)
+            df = pd.read_parquet(args.historical)
     except Exception as e:
         print(f"Error loading parquet file: {e}", file=sys.stderr)
         sys.exit(1)

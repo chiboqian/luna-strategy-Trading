@@ -7,7 +7,7 @@ or after a specified number of business days.
 
 Usage:
     python util/run_backtest.py --start-date 2023-01-01 --end-date 2023-06-30 \
-        --strategy synthetic_long --symbol SPY --parquet data/options.parquet \
+        --strategy synthetic_long --symbol SPY --historical data/options.parquet \
         --output-dir results/spy_backtest --strategy-args "--days 30"
 """
 
@@ -72,10 +72,11 @@ def main():
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor", "straddle"], help="Strategy to run")
     parser.add_argument("--symbol", required=True, help="Symbol (e.g. SPY)")
-    parser.add_argument("--parquet", required=True, help="Path to historical parquet file or dataset directory")
+    parser.add_argument("--historical", required=True, help="Path to historical data file or dataset directory")
     parser.add_argument("--output-dir", required=True, help="Directory to save results")
     parser.add_argument("--strategy-args", default="", help="Additional args for strategy script (e.g. '--days 45')")
     parser.add_argument("--hold-days", type=int, default=None, help="Number of business days to hold position (default: close on last day of week)")
+    parser.add_argument("--entry-time", default="09:30:00", help="Time of entry (HH:MM:SS)")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     
     args = parser.parse_args()
@@ -115,17 +116,20 @@ def main():
     for open_dt, close_dt in schedule:
         open_str = open_dt.strftime("%Y-%m-%d")
         close_str = close_dt.strftime("%Y-%m-%d")
+        if args.entry_time:
+            open_str = f"{open_str} {args.entry_time}"
         
         print(f"Processing Week: Open {open_str} -> Close {close_str}")
         
         # 1. Open Position
-        order_file = output_dir / f"order_{open_str}.json"
+        open_str_safe = open_str.replace(" ", "_").replace(":", "")
+        order_file = output_dir / f"order_{open_str_safe}.json"
         
         # Build Open Command
         cmd_open = [
             sys.executable, str(strategy_script),
             args.symbol,
-            "--parquet", args.parquet,
+            "--historical", args.historical,
             "--date", open_str,
             "--save-order", str(order_file),
             "--json"
@@ -152,12 +156,12 @@ def main():
             continue
             
         # 2. Close Position
-        pnl_file = output_dir / f"pnl_{open_str}_to_{close_str}.json"
+        pnl_file = output_dir / f"pnl_{open_str_safe}_to_{close_str}.json"
         
         cmd_close = [
             sys.executable, str(close_script),
             "--order", str(order_file),
-            "--parquet", args.parquet,
+            "--historical", args.historical,
             "--date", close_str,
             "--output", str(pnl_file),
             "--json"
