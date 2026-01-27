@@ -72,6 +72,9 @@ def run_command(cmd, verbose=False):
     print(f"Exec: {' '.join(cmd)}")
     try:
         result = subprocess.run(cmd, capture_output=True, text=True)
+        if verbose:
+            if result.stdout: print(result.stdout)
+            if result.stderr: print(result.stderr, file=sys.stderr)
         return result
     except Exception as e:
         print(f"Error executing command: {e}")

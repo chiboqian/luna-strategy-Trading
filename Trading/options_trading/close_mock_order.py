@@ -107,6 +107,11 @@ def main():
     if day_df.empty:
         print(f"Error: No data found for date {args.date}", file=sys.stderr)
         sys.exit(1)
+        
+    # Debug: Print data range
+    min_t = day_df[date_col].min()
+    max_t = day_df[date_col].max()
+    print(f"Data loaded for {args.date}: {len(day_df)} rows, Range: {min_t} to {max_t}", file=sys.stderr)
 
     # Identify Columns
     cols = day_df.columns
@@ -144,8 +149,10 @@ def main():
         row = day_df[day_df[col_map['symbol']] == symbol]
         
         if row.empty:
-            print(f"Warning: No data for {symbol} on {args.date}. Assuming 0 price.", file=sys.stderr)
-            close_price = 0.0
+            available = day_df[col_map['symbol']].unique()[:10]
+            print(f"Error: Symbol {symbol} not found in data for {args.date}.", file=sys.stderr)
+            print(f"Available symbols (first 10): {available}", file=sys.stderr)
+            sys.exit(1)
         else:
             r = row.iloc[0]
             bid = float(r.get(col_map['bid'], 0))
