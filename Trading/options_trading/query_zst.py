@@ -39,7 +39,7 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
     if not file_type:
         if ".json" in file_path.lower():
             file_type = 'json'
-        elif ".dbn" in file_path.lower():
+        elif ".dbn" in file_path.lower() or ".dbz" in file_path.lower():
             file_type = 'dbn'
         else:
             file_type = 'csv' # Default to CSV for .csv.zst or just .zst
@@ -196,7 +196,7 @@ def main():
     parser.add_argument("--limit", type=int, default=10, help="Number of rows to display")
     parser.add_argument("--describe", action="store_true", help="Show dataset schema and info")
     parser.add_argument("--unique", help="Show unique values for a specific column")
-    parser.add_argument("--type", choices=['csv', 'json', 'dbn'], help="Force file type (csv, json, dbn). Default: inferred from extension")
+    parser.add_argument("--type", choices=['csv', 'json', 'dbn'], help="Force file type (csv, json, dbn). Default: inferred from extension (supports .dbz)")
     args = parser.parse_args()
 
     query_zst(args.file, args.query, args.columns, args.limit, args.describe, args.unique, args.sql, args.type)
