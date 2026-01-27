@@ -65,6 +65,19 @@ def analyze_results(directory: str, output_csv: str = None):
     df.to_csv(out_path, index=False)
     print(f"Saved summary CSV to: {out_path}")
     
+    # Trade History
+    print("\n" + "="*55)
+    print("Trade History")
+    print("="*55)
+    print(f"{'Date':<12} | {'Cost/Credit':>12} | {'P&L':>12} | {'Result':<6}")
+    print("-" * 55)
+    
+    for _, row in df.iterrows():
+        date_str = row['close_date'].strftime('%Y-%m-%d') if pd.notnull(row['close_date']) else "N/A"
+        initial_cash = row['entry_cost'] * row['quantity'] * 100
+        result = "WIN" if row['total_pnl'] > 0 else "LOSS" if row['total_pnl'] < 0 else "FLAT"
+        print(f"{date_str:<12} | ${initial_cash:>11.2f} | ${row['total_pnl']:>11.2f} | {result:<6}")
+
     # Analysis
     total_trades = len(df)
     total_pnl = df['total_pnl'].sum()
