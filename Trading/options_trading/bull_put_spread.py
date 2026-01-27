@@ -1007,6 +1007,7 @@ def main():
     parser.add_argument("--top", type=int, default=5,
                         help="Number of recommendations to show in optimize mode (default: 5)")
     parser.add_argument("--historical", type=str, help="Path to historical data file (mock mode)")
+    parser.add_argument("--underlying", type=str, help="Path to underlying data file (mock mode)")
     parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
     parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
     
@@ -1046,7 +1047,7 @@ def main():
         reference_date = datetime.now()
 
     if args.historical:
-        client = MockOptionClient(args.historical, reference_date, args.save_order)
+        client = MockOptionClient(args.historical, reference_date, args.save_order, args.underlying)
     else:
         client = AlpacaClient()
 

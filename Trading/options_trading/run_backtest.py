@@ -73,10 +73,12 @@ def main():
     parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor", "straddle"], help="Strategy to run")
     parser.add_argument("--symbol", required=True, help="Symbol (e.g. SPY)")
     parser.add_argument("--historical", required=True, help="Path to historical data file or dataset directory")
+    parser.add_argument("--underlying", help="Path to underlying data file or dataset directory")
     parser.add_argument("--output-dir", required=True, help="Directory to save results")
     parser.add_argument("--strategy-args", default="", help="Additional args for strategy script (e.g. '--days 45')")
     parser.add_argument("--hold-days", type=int, default=None, help="Number of business days to hold position (default: close on last day of week)")
     parser.add_argument("--entry-time", default="09:30:00", help="Time of entry (HH:MM:SS)")
+    parser.add_argument("--exit-time", default="15:55:00", help="Time of exit (HH:MM:SS)")
     parser.add_argument("--verbose", action="store_true", help="Verbose output")
     
     args = parser.parse_args()
@@ -118,6 +120,8 @@ def main():
         close_str = close_dt.strftime("%Y-%m-%d")
         if args.entry_time:
             open_str = f"{open_str} {args.entry_time}"
+        if args.exit_time:
+            close_str = f"{close_str} {args.exit_time}"
         
         print(f"Processing Week: Open {open_str} -> Close {close_str}")
         
@@ -134,6 +138,9 @@ def main():
             "--save-order", str(order_file),
             "--json"
         ]
+        
+        if args.underlying:
+            cmd_open.extend(["--underlying", args.underlying])
         
         # Add strategy specific args
         if args.strategy_args:

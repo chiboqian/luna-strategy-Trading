@@ -69,14 +69,39 @@ def main():
         print("Error: No date column in parquet", file=sys.stderr)
         sys.exit(1)
         
-    # Filter for Close Date
-    # Convert to string for matching YYYY-MM-DD
-    # Databento ts_event is datetime64[ns, UTC]
-    if pd.api.types.is_datetime64_any_dtype(df[date_col]):
-        # Ensure we match the date part
-        df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
-        
-    day_df = df[df[date_col].astype(str).str.startswith(args.date)].copy()
+    # Parse target date to check for time component
+    try:
+        target_dt = datetime.strptime(args.date, "%Y-%m-%d %H:%M:%S")
+        has_time = True
+    except ValueError:
+        target_dt = datetime.strptime(args.date, "%Y-%m-%d")
+        has_time = False
+
+    # Filter Data
+    if has_time:
+        # Ensure datetime type
+        if not pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            try:
+                df[date_col] = pd.to_datetime(df[date_col])
+            except Exception:
+                pass # Fallback to string matching if conversion fails
+
+        if pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            # Handle Timezone (assume input is ET if data is TZ-aware)
+            compare_dt = target_dt
+            if df[date_col].dt.tz is not None and target_dt.tzinfo is None:
+                compare_dt = pd.Timestamp(target_dt).tz_localize('America/New_York').tz_convert(df[date_col].dt.tz)
+            
+            # Filter: Same day (start) <= time <= compare_dt
+            start_dt = compare_dt.normalize()
+            day_df = df[(df[date_col] >= start_dt) & (df[date_col] <= compare_dt)].copy()
+            day_df = day_df.sort_values(date_col)
+        else:
+            day_df = df[df[date_col].astype(str).str.startswith(args.date.split()[0])].copy()
+    else:
+        if pd.api.types.is_datetime64_any_dtype(df[date_col]):
+            df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
+        day_df = df[df[date_col].astype(str).str.startswith(args.date)].copy()
     
     if day_df.empty:
         print(f"Error: No data found for date {args.date}", file=sys.stderr)
@@ -98,6 +123,11 @@ def main():
     if 'bid_px_00' in cols: col_map['bid'] = 'bid_px_00'
     if 'ask_px_00' in cols: col_map['ask'] = 'ask_px_00'
     
+    # Deduplicate to keep latest snapshot per symbol (important for minute data)
+    if col_map['symbol'] in day_df.columns:
+        # Keep last occurrence (latest time)
+        day_df = day_df.drop_duplicates(subset=[col_map['symbol']], keep='last')
+
     legs = order.get('legs', [])
     quantity = float(order.get('quantity', 1))
     entry_cash_flow = float(order.get('entry_cash_flow', 0.0))
