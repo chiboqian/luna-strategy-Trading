@@ -202,6 +202,8 @@ def run_mock_loop(args):
         print(f"Monitoring {root_symbol} position expiring {expiry_date.date()}")
         print(f"Start Date: {current_date.date()}")
 
+    last_metrics = None
+
     # 2. Iterate Days
     while current_date <= expiry_date:
         date_str = current_date.strftime("%Y-%m-%d")
@@ -348,6 +350,7 @@ def run_mock_loop(args):
                 
             # Calculate Metrics
             metrics = calculate_group_metrics(current_legs)
+            last_metrics = metrics
             
             # Check Rules
             # DTE
@@ -389,7 +392,18 @@ def run_mock_loop(args):
 
         current_date += timedelta(days=1)
     
-    if not args.json:
+    if args.json:
+        pnl = last_metrics['unrealized_pl'] if last_metrics else 0.0
+        pnl_pct = last_metrics['pl_pct'] if last_metrics else 0.0
+        result = {
+            "status": "expired",
+            "close_date": str(current_date),
+            "reason": "Expiration/End of Data",
+            "pnl": pnl,
+            "pnl_pct": pnl_pct
+        }
+        print(json.dumps(result))
+    else:
         print("\nReached end of data/expiration without triggering exit.")
 
 def main():

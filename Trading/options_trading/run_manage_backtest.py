@@ -67,7 +67,8 @@ def main():
                         
                         if json_line:
                             data = json.loads(json_line)
-                            if 'status' in data and data['status'] == 'closed':
+                            status = data.get('status')
+                            if status == 'closed':
                                 results.append({
                                     'order_file': order_file.name,
                                     'close_date': data['close_date'],
@@ -76,8 +77,17 @@ def main():
                                     'pnl_pct': data['pnl_pct']
                                 })
                                 print(f"  -> Closed: {data['reason']} (PnL: ${data['pnl']:.2f})")
+                            elif status == 'expired':
+                                results.append({
+                                    'order_file': order_file.name,
+                                    'close_date': data['close_date'],
+                                    'reason': data['reason'],
+                                    'pnl': data['pnl'],
+                                    'pnl_pct': data['pnl_pct']
+                                })
+                                print(f"  -> Expired: {data['reason']} (PnL: ${data['pnl']:.2f})")
                             else:
-                                print(f"  -> No exit triggered.")
+                                print(f"  -> No exit triggered (Status: {status}).")
                         else:
                             print(f"  -> No valid JSON output found.")
                     else:
