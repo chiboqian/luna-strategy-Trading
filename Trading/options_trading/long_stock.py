@@ -201,6 +201,7 @@ def main():
         else:
             print(f"Order Submitted: {response.get('id')}")
             print(f"Purchased Share Price: ${exec_price:.2f}")
+            print(f"Total Cost: ${exec_price * args.quantity:.2f}")
             
     except Exception as e:
         err = {"error": str(e)}

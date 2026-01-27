@@ -207,7 +207,23 @@ def main():
                 od = json.load(f)
                 qty = float(od.get('quantity', 0))
                 filled_at = od.get('filled_at', open_str).replace('T', ' ')
-                print(f"  ✅ Open: {od.get('id')} @ {filled_at} (Qty: {qty}, Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
+                
+                entry_cf = float(od.get('entry_cash_flow', 0))
+                
+                # Determine multiplier (100 for options, 1 for stocks)
+                multiplier = 100.0
+                legs = od.get('legs') or []
+                if od.get('asset_class') == 'us_equity':
+                    multiplier = 1.0
+                elif legs and len(legs) > 0 and len(legs[0].get('symbol', '')) < 6:
+                    multiplier = 1.0
+                
+                total_cost = entry_cf * qty * multiplier
+                is_debit = total_cost < 0
+                label = "Total Cost" if is_debit else "Total Credit"
+                
+                print(f"  ✅ Open: {od.get('id')} @ {filled_at} (Qty: {qty}, Unit: ${abs(entry_cf):.2f}, {label}: ${abs(total_cost):.2f})")
+                
                 if qty == 0:
                     print(f"     ⚠️ Warning: Quantity is 0. Check --amount vs strategy risk.")
                     if res_open and res_open.stderr:
