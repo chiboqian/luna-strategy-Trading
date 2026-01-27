@@ -212,6 +212,14 @@ def main():
                 total_pnl = pnl_data.get('total_pnl', 0.0)
                 print(f"  ✅ P&L: ${total_pnl:.2f}")
                 
+                if 'legs' in pnl_data:
+                    for leg in pnl_data['legs']:
+                        l_sym = leg.get('symbol')
+                        l_price = leg.get('close_price', 0.0)
+                        l_side = leg.get('side')
+                        close_action = "Sell" if l_side == 'buy' else "Buy"
+                        print(f"     Close {l_sym} ({close_action}): ${l_price:.2f}")
+
                 results.append({
                     "open_date": open_str,
                     "close_date": close_str,
