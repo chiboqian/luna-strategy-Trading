@@ -309,6 +309,26 @@ class MockOptionClient:
 
         return {'p': 0.0}
 
+    def get_stock_latest_quote(self, symbol: str):
+        if self.underlying_df is not None and not self.underlying_df.empty:
+            subset = self.underlying_df
+            if 'symbol' in self.underlying_df.columns:
+                subset = self.underlying_df[self.underlying_df['symbol'] == symbol]
+            
+            if not subset.empty:
+                row = subset.iloc[-1]
+                bp = 0.0
+                ap = 0.0
+                # Check for Databento or standard columns
+                if 'bid_px_00' in row: bp = float(row['bid_px_00'])
+                elif 'bid' in row: bp = float(row['bid'])
+                
+                if 'ask_px_00' in row: ap = float(row['ask_px_00'])
+                elif 'ask' in row: ap = float(row['ask'])
+                
+                return {'bp': bp, 'ap': ap}
+        return {}
+
     def get_stock_snapshot(self, symbol: str):
         trade = self.get_stock_latest_trade(symbol)
         return {'latestTrade': trade, 'dailyBar': {'c': trade['p']}}
