@@ -385,6 +385,7 @@ def main():
             print(f"\n✅ Order placed successfully!")
             print(f"   Order ID: {order_id}")
             print(f"   Status: {status}")
+            print(f"   Purchased Share Price: ${entry_price:.2f}")
         else:
             result = {
                 "success": True,
