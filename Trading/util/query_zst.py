@@ -10,6 +10,12 @@ try:
 except ImportError:
     HAS_DUCKDB = False
 
+try:
+    import databento
+    HAS_DATABENTO = True
+except ImportError:
+    HAS_DATABENTO = False
+
 def query_zst(file_path, query=None, columns=None, limit=10, describe=False, unique=None, sql=None, file_type=None):
     """
     Reads a Zstandard compressed file (CSV/JSON) and optionally queries/filter the data.
@@ -33,10 +39,27 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
     if not file_type:
         if ".json" in file_path.lower():
             file_type = 'json'
+        elif ".dbn" in file_path.lower() or ".dbz" in file_path.lower():
+            file_type = 'dbn'
         else:
             file_type = 'csv' # Default to CSV for .csv.zst or just .zst
 
     df = None
+
+    # Handle DBN files (Databento)
+    if file_type == 'dbn':
+        if not HAS_DATABENTO:
+            print("Error: databento is not installed. Please run: pip install databento", file=sys.stderr)
+            sys.exit(1)
+        try:
+            print(f"Reading DBN file {file_path}...")
+            # DBNStore handles compression transparently
+            df = databento.DBNStore.from_file(file_path).to_df()
+            # Reset index to make fields accessible as columns
+            df.reset_index(inplace=True)
+        except Exception as e:
+            print(f"Error reading DBN file: {e}", file=sys.stderr)
+            sys.exit(1)
 
     if sql:
         if not HAS_DUCKDB:
@@ -44,18 +67,31 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
             sys.exit(1)
         
         # Construct SQL
-        # If it looks like a full query, replace TABLE placeholder
         sql_upper = sql.strip().upper()
-        if sql_upper.startswith("SELECT") or sql_upper.startswith("DESCRIBE") or sql_upper.startswith("SHOW"):
-            final_sql = sql.replace("TABLE", f"'{file_path}'")
+        
+        if df is not None:
+            # Query the in-memory DataFrame
+            if sql_upper.startswith("SELECT") or sql_upper.startswith("DESCRIBE") or sql_upper.startswith("SHOW"):
+                final_sql = sql.replace("TABLE", "df")
+            else:
+                cols = "*"
+                if columns:
+                    cols = ", ".join(columns)
+                final_sql = f"SELECT {cols} FROM df WHERE {sql}"
+            print(f"Executing DuckDB SQL on DataFrame: {final_sql}")
         else:
-            # Assume it's a WHERE clause
-            cols = "*"
-            if columns:
-                cols = ", ".join(columns)
-            final_sql = f"SELECT {cols} FROM '{file_path}' WHERE {sql}"
+            # Query the file directly
+            if sql_upper.startswith("SELECT") or sql_upper.startswith("DESCRIBE") or sql_upper.startswith("SHOW"):
+                final_sql = sql.replace("TABLE", f"'{file_path}'")
+            else:
+                # Assume it's a WHERE clause
+                cols = "*"
+                if columns:
+                    cols = ", ".join(columns)
+                final_sql = f"SELECT {cols} FROM '{file_path}' WHERE {sql}"
             
-        print(f"Executing DuckDB SQL: {final_sql}")
+            print(f"Executing DuckDB SQL: {final_sql}")
+            
         try:
             df = duckdb.sql(final_sql).df()
         except Exception as e:
@@ -63,7 +99,7 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
             sys.exit(1)
     else:
         # Optimization: Try to push down pandas query to DuckDB SQL if possible
-        if query and HAS_DUCKDB:
+        if query and HAS_DUCKDB and df is None:
             # Heuristic: Convert pandas '==' to SQL '='
             sql_where = query.replace("==", "=")
             cols_select = "*"
@@ -88,6 +124,13 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
                 print(f"Warning: DuckDB read failed ({e}), falling back to pandas.", file=sys.stderr)
 
         if df is None:
+            # Guard against reading binary DBN files as CSV if inference failed or was overridden
+            if ".dbn" in file_path.lower() or ".dbz" in file_path.lower():
+                print("Error: File appears to be a Databento binary file (.dbn/.dbz) but was not processed as such.", file=sys.stderr)
+                if not HAS_DATABENTO:
+                    print("Hint: 'databento' library is required. Install with: pip install databento", file=sys.stderr)
+                sys.exit(1)
+
             try:
                 # Pandas requires zstandard for .zst
                 if file_type == 'json':
@@ -111,6 +154,14 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
                 print(f"Error executing query '{query}': {e}", file=sys.stderr)
                 print("Hint: Use '==' for equality and quotes for strings (e.g., \"type == 'call'\")", file=sys.stderr)
                 sys.exit(1)
+
+    # Filter columns for DBN if not handled by SQL
+    if file_type == 'dbn' and columns and not sql:
+        try:
+            df = df[columns]
+        except KeyError as e:
+            print(f"Error: Column not found: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Adjust pandas display options to show all rows requested
     pd.set_option('display.max_rows', None)
@@ -153,7 +204,7 @@ def main():
     parser.add_argument("--limit", type=int, default=10, help="Number of rows to display")
     parser.add_argument("--describe", action="store_true", help="Show dataset schema and info")
     parser.add_argument("--unique", help="Show unique values for a specific column")
-    parser.add_argument("--type", choices=['csv', 'json'], help="Force file type (csv or json). Default: inferred from extension")
+    parser.add_argument("--type", choices=['csv', 'json', 'dbn'], help="Force file type (csv, json, dbn). Default: inferred from extension (supports .dbz)")
     args = parser.parse_args()
 
     query_zst(args.file, args.query, args.columns, args.limit, args.describe, args.unique, args.sql, args.type)
