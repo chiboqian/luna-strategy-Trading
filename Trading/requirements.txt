@@ -3,3 +3,4 @@ python-dotenv
 PyYAML
 boto3
 ibapi
+databento
