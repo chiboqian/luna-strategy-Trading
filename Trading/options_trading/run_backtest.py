@@ -144,7 +144,7 @@ def main():
         print(f"Error generating schedule: {e}", file=sys.stderr)
         sys.exit(1)
         
-    print(f"Found {len(schedule)} trading weeks.")
+    print(f"Found {len(schedule)} trading sessions.")
     
     results = []
     
@@ -156,7 +156,7 @@ def main():
         if args.exit_time:
             close_str = f"{close_str} {args.exit_time}"
         
-        print(f"Processing Week: Open {open_str} -> Close {close_str}")
+        print(f"Processing Session: Open {open_str} -> Close {close_str}")
         
         # 1. Open Position
         open_str_safe = open_str.replace(" ", "_").replace(":", "")

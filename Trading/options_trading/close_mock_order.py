@@ -203,7 +203,7 @@ def main():
                 'ask': ask,
                 'mark': mark,
                 'last': last,
-                'ts': ts
+                'ts': str(ts)
             }
             
             # Check if we have prices for all legs to calculate PnL
