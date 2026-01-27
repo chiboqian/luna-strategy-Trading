@@ -123,6 +123,13 @@ def query_zst(file_path, query=None, columns=None, limit=10, describe=False, uni
                 print(f"Warning: DuckDB read failed ({e}), falling back to pandas.", file=sys.stderr)
 
         if df is None:
+            # Guard against reading binary DBN files as CSV if inference failed or was overridden
+            if ".dbn" in file_path.lower() or ".dbz" in file_path.lower():
+                print("Error: File appears to be a Databento binary file (.dbn/.dbz) but was not processed as such.", file=sys.stderr)
+                if not HAS_DATABENTO:
+                    print("Hint: 'databento' library is required. Install with: pip install databento", file=sys.stderr)
+                sys.exit(1)
+
             try:
                 # Pandas requires zstandard for .zst
                 if file_type == 'json':
