@@ -16,7 +16,7 @@ except ImportError:
 
 class MockOptionClient:
     """Mock client to simulate AlpacaClient using historical Parquet data."""
-    def __init__(self, parquet_file: str, target_date: datetime, save_order_file: str = None, underlying_file: str = None):
+    def __init__(self, parquet_file: str, target_date: datetime, save_order_file: str = None, underlying_file: str = None, deduplicate: bool = True):
         if pd is None:
             raise ImportError("pandas is required for MockOptionClient")
         
@@ -103,7 +103,7 @@ class MockOptionClient:
             
             # Always deduplicate to ensure unique contracts (keep latest snapshot)
             symbol_col = self.col_map['symbol']
-            if symbol_col in self.df.columns:
+            if deduplicate and symbol_col in self.df.columns:
                  self.df = self.df.sort_values(date_col)
                  self.df = self.df.drop_duplicates(subset=[symbol_col], keep='last')
         
