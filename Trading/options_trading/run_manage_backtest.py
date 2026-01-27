@@ -49,7 +49,8 @@ def main():
         ]
         
         try:
-            res = subprocess.run(cmd, capture_output=True, text=True)
+            # Capture stdout only, let stderr flow to console for progress updates
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, text=True)
             if res.returncode == 0:
                 try:
                     # The script might print other things, find the JSON line
@@ -85,7 +86,7 @@ def main():
                 except json.JSONDecodeError:
                     print(f"  -> Error parsing JSON output.")
             else:
-                print(f"  -> Error running script: {res.stderr}")
+                print(f"  -> Error running script (exit code {res.returncode})")
         except Exception as e:
             print(f"  -> Exception: {e}")
             

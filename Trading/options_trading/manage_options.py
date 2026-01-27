@@ -207,6 +207,8 @@ def run_mock_loop(args):
         date_str = current_date.strftime("%Y-%m-%d")
         if not args.json:
             print(f"Processing {date_str}...", end="", flush=True)
+        else:
+            print(f"Processing {date_str}...", file=sys.stderr)
         
         # Load Data for the day (No deduplication to get all minutes)
         try:
@@ -217,17 +219,23 @@ def run_mock_loop(args):
         except FileNotFoundError:
             if not args.json:
                 print(f" No data found. Skipping.")
+            else:
+                print(f" No data found for {date_str}. Skipping.", file=sys.stderr)
             current_date += timedelta(days=1)
             continue
         except Exception as e:
             if not args.json:
                 print(f" Error loading data: {e}")
+            else:
+                print(f" Error loading data for {date_str}: {e}", file=sys.stderr)
             current_date += timedelta(days=1)
             continue
             
         if df is None or df.empty:
             if not args.json:
                 print(f" Empty data.")
+            else:
+                print(f" Empty data for {date_str}.", file=sys.stderr)
             current_date += timedelta(days=1)
             continue
 
@@ -236,6 +244,8 @@ def run_mock_loop(args):
         if not date_col:
             if not args.json:
                 print(" No date column found.")
+            else:
+                print(f" No date column found for {date_str}.", file=sys.stderr)
             current_date += timedelta(days=1)
             continue
             
@@ -250,6 +260,8 @@ def run_mock_loop(args):
         if df.empty:
             if not args.json:
                 print(" No data for position symbols.")
+            else:
+                print(f" No data for position symbols on {date_str}.", file=sys.stderr)
             current_date += timedelta(days=1)
             continue
             
@@ -261,6 +273,8 @@ def run_mock_loop(args):
         timestamps = df[date_col].unique()
         if not args.json:
             print(f" {len(timestamps)} time steps.")
+        else:
+            print(f" {len(timestamps)} time steps.", file=sys.stderr)
         
         for ts in timestamps:
             # Get snapshot for this minute
