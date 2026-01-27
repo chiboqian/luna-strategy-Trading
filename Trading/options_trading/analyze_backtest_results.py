@@ -54,7 +54,7 @@ def analyze_results(directory: str, output_csv: str = None):
     
     # Sort by date
     if 'close_date' in df.columns:
-        df['close_date'] = pd.to_datetime(df['close_date'])
+        df['close_date'] = pd.to_datetime(df['close_date'], format='mixed', utc=True)
         df = df.sort_values('close_date')
     
     # Save CSV
