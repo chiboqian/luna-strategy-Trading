@@ -185,6 +185,8 @@ def main():
                 print(f"  ✅ Open: {od.get('id')} (Qty: {qty}, Entry Cost: ${od.get('entry_cash_flow', 0):.2f})")
                 if qty == 0:
                     print(f"     ⚠️ Warning: Quantity is 0. Check --amount vs strategy risk.")
+                    if res_open and res_open.stderr:
+                        print(f"     ℹ️  Strategy Log: {res_open.stderr.strip()}")
         except:
             pass
             

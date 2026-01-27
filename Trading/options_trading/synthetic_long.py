@@ -469,16 +469,25 @@ def main():
             # --- Auto-Calculate Quantity if --amount is used ---
             if args.amount and args.amount > 0:
                 # Calculate capital required per contract structure
-                # We use Max Loss as the conservative capital requirement
-                # because this is the maximum amount at risk.
-                # Max Loss = (Call - Prot) + Premiums
-                risk_per_contract = metrics['max_loss'] * 100.0
+                if args.with_protection:
+                    # Defined Risk: Use Max Loss
+                    risk_per_contract = metrics['max_loss'] * 100.0
+                else:
+                    # Undefined Risk (Pure Synthetic): Use Margin Requirement
+                    # Reg T Margin for Short Put ~ 20% of Underlying
+                    # We use 20% of strike as a proxy + net cost
+                    margin_req = (put_strike * 0.20) * 100.0
+                    risk_per_contract = margin_req + (metrics['net_cost'] * 100.0)
                 
                 if risk_per_contract > 0:
                     auto_qty = int(args.amount // risk_per_contract)
                     if auto_qty < 1:
+                        msg = f"Warning: Amount ${args.amount} is insufficient for 1 contract (Requires ~${risk_per_contract:.2f})"
                         if not args.json:
-                            print(f"\nWarning: Amount ${args.amount} is insufficient for 1 contract (Requires ~${risk_per_contract:.2f})")
+                            print(f"\n{msg}")
+                        else:
+                            # Print to stderr so backtester captures it
+                            print(msg, file=sys.stderr)
                         args.quantity = 0 # Will likely fail or just skip
                     else:
                         args.quantity = auto_qty
