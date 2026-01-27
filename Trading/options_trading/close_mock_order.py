@@ -12,6 +12,11 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
+try:
+    import databento
+except ImportError:
+    databento = None
+
 def main():
     parser = argparse.ArgumentParser(description="Close Mock Order and Calculate P&L")
     parser.add_argument("--order", required=True, help="Path to mock order JSON file")
@@ -36,10 +41,22 @@ def main():
             # New structure: folder -> year -> date.parquet
             year_str = args.date.split('-')[0]
             file_path = path_input / year_str / f"{args.date}.parquet"
+            
+            # Check for Databento format
             if not file_path.exists():
-                raise FileNotFoundError(f"Daily parquet file not found: {file_path}")
+                dbn_date = args.date.replace('-', '')
+                file_path = path_input / f"{dbn_date}.dbn.zst"
+            
+            if not file_path.exists():
+                raise FileNotFoundError(f"Daily data file not found in {path_input}")
+                
             print(f"Loading {file_path}...")
-            df = pd.read_parquet(file_path)
+            if str(file_path).endswith('.dbn.zst'):
+                if not databento: raise ImportError("databento module required")
+                df = databento.DBNStore.from_file(file_path).to_df()
+                df.reset_index(inplace=True)
+            else:
+                df = pd.read_parquet(file_path)
         else:
             df = pd.read_parquet(args.parquet)
     except Exception as e:
@@ -47,13 +64,18 @@ def main():
         sys.exit(1)
     
     # Identify Date Column
-    date_col = next((c for c in ['date', 'quote_date', 'timestamp', 'time'] if c in df.columns), None)
+    date_col = next((c for c in ['date', 'quote_date', 'timestamp', 'time', 'ts_event'] if c in df.columns), None)
     if not date_col:
         print("Error: No date column in parquet", file=sys.stderr)
         sys.exit(1)
         
     # Filter for Close Date
     # Convert to string for matching YYYY-MM-DD
+    # Databento ts_event is datetime64[ns, UTC]
+    if pd.api.types.is_datetime64_any_dtype(df[date_col]):
+        # Ensure we match the date part
+        df[date_col] = df[date_col].dt.strftime('%Y-%m-%d')
+        
     day_df = df[df[date_col].astype(str).str.startswith(args.date)].copy()
     
     if day_df.empty:
@@ -71,6 +93,10 @@ def main():
     }
     if 'contract_id' in cols:
         col_map['symbol'] = 'contract_id'
+    
+    # Databento mapping
+    if 'bid_px_00' in cols: col_map['bid'] = 'bid_px_00'
+    if 'ask_px_00' in cols: col_map['ask'] = 'ask_px_00'
     
     legs = order.get('legs', [])
     quantity = float(order.get('quantity', 1))

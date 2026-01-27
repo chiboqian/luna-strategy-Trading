@@ -38,6 +38,11 @@ try:
 except ImportError:
     pd = None
 
+try:
+    import databento
+except ImportError:
+    databento = None
+
 # Add parent directory to path to import Trading modules
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
@@ -66,11 +71,22 @@ class MockOptionClient:
             date_str = target_date.strftime('%Y-%m-%d')
             file_path = path_input / year_str / f"{date_str}.parquet"
             
+            # Fallback to Databento format: YYYYMMDD.dbn.zst
+            if not file_path.exists():
+                dbn_date = target_date.strftime('%Y%m%d')
+                file_path = path_input / f"{dbn_date}.dbn.zst"
+            
             if not file_path.exists():
                 raise FileNotFoundError(f"Daily parquet file not found: {file_path}")
                 
             print(f"Loading historical data from {file_path}...")
-            self.df = pd.read_parquet(file_path)
+            if str(file_path).endswith('.dbn.zst'):
+                if not databento:
+                    raise ImportError("databento module required for .dbn.zst files")
+                self.df = databento.DBNStore.from_file(file_path).to_df()
+                self.df.reset_index(inplace=True)
+            else:
+                self.df = pd.read_parquet(file_path)
         else:
             print(f"Loading historical data from {parquet_file}...")
             self.df = pd.read_parquet(parquet_file)
@@ -113,6 +129,24 @@ class MockOptionClient:
         if 'strike_price' in cols: self.col_map['strike'] = 'strike_price'
         if 'expiration_date' in cols: self.col_map['expiration'] = 'expiration_date'
         if 'option_type' in cols: self.col_map['type'] = 'option_type'
+        
+        # Databento mapping
+        if 'bid_px_00' in cols: self.col_map['bid'] = 'bid_px_00'
+        if 'ask_px_00' in cols: self.col_map['ask'] = 'ask_px_00'
+        
+        # Parse OCC symbols if metadata columns are missing
+        if self.col_map['strike'] not in cols and 'symbol' in cols:
+            self._parse_occ_symbols()
+            
+    def _parse_occ_symbols(self):
+        """Parses OCC symbols (e.g. AAPL230616C00150000) into metadata columns."""
+        # Regex: Root(chars) + Date(6 digits) + Type(C/P) + Strike(8 digits)
+        extracted = self.df['symbol'].str.extract(r'^([A-Z]+)(\d{6})([CP])(\d{8})$')
+        if not extracted.empty:
+            self.df[self.col_map['root']] = extracted[0]
+            self.df[self.col_map['expiration']] = pd.to_datetime(extracted[1], format='%y%m%d').dt.strftime('%Y-%m-%d')
+            self.df[self.col_map['type']] = extracted[2].map({'C': 'call', 'P': 'put'})
+            self.df[self.col_map['strike']] = extracted[3].astype(float) / 1000.0
 
     def get_stock_latest_trade(self, symbol: str):
         if self.col_map['underlying'] in self.df.columns:
