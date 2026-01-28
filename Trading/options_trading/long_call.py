@@ -261,6 +261,7 @@ def main():
 
         if isinstance(client, MockOptionClient):
             kwargs['entry_cash_flow'] = entry_cash_flow
+            kwargs['underlying_price'] = current_price
             response = client.place_option_market_order(**kwargs)
         else:
             response = client.place_option_market_order(**kwargs)

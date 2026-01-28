@@ -236,7 +236,9 @@ def main():
                 is_debit = total_cost < 0
                 label = "Total Cost" if is_debit else "Total Credit"
                 
-                print(f"  ✅ Open: {od.get('id')} @ {filled_at} (Qty: {qty}, Unit: ${abs(entry_cf):.2f}, {label}: ${abs(total_cost):.2f})")
+                und_price = od.get('underlying_price', 0)
+                und_str = f" | Und: ${und_price:.2f}" if und_price else ""
+                print(f"  ✅ Open: {od.get('id')} @ {filled_at}{und_str} (Qty: {qty}, Unit: ${abs(entry_cf):.2f}, {label}: ${abs(total_cost):.2f})")
                 
                 if qty == 0:
                     print(f"     ⚠️ Warning: Quantity is 0. Check --amount vs strategy risk.")
@@ -285,7 +287,9 @@ def main():
                 qty = float(pnl_data.get('quantity', 0))
                 close_ts = pnl_data.get('close_date', close_str)
                 reason = pnl_data.get('close_reason', 'Exit Time')
-                print(f"  ✅ Close @ {close_ts} ({reason}) | P&L: ${total_pnl:.2f} (Qty: {qty})")
+                und_price = pnl_data.get('underlying_price', 0)
+                und_str = f" | Und: ${und_price:.2f}" if und_price else ""
+                print(f"  ✅ Close @ {close_ts} ({reason}){und_str} | P&L: ${total_pnl:.2f} (Qty: {qty})")
                 
                 if 'legs' in pnl_data:
                     for leg in pnl_data['legs']:

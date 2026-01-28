@@ -188,6 +188,23 @@ def main():
         if 'symbol' in u_cols: u_col_map['symbol'] = 'symbol'
     
     # If we are NOT stepping through prices (no SL/TP), we can deduplicate to just the last row per symbol
+    
+    # Determine Underlying Price at Close
+    close_underlying_price = 0.0
+    if underlying_df is not None and not underlying_df.empty:
+        # underlying_df is already filtered by time in load_data_source
+        row = underlying_df.iloc[-1]
+        for c in ['price', 'last', 'close', 'mark', 'bid_px_00']:
+             if c in row and pd.notnull(row[c]):
+                 close_underlying_price = float(row[c])
+                 break
+    elif not day_df.empty:
+         row = day_df.iloc[-1]
+         for c in ['underlying_price', 'underlying_last', 'spot']:
+             if c in row and pd.notnull(row[c]):
+                 close_underlying_price = float(row[c])
+                 break
+
     # But if we have SL/TP, we need the time series.
     # For simplicity, let's keep the time series if SL/TP is requested, otherwise deduplicate.
     use_step_logic = args.stop_loss_pct is not None or args.take_profit_pct is not None
@@ -404,6 +421,7 @@ def main():
         "order_id": order.get('id'),
         "close_date": str(close_timestamp),
         "close_reason": close_reason,
+        "underlying_price": close_underlying_price,
         "entry_cash_flow": entry_cash_flow,
         "exit_cash_flow": exit_cash_flow,
         "unit_pnl": unit_pnl,
@@ -420,7 +438,7 @@ def main():
     if args.json:
         print(json.dumps(result, indent=2))
     else:
-        print(f"Close Date: {close_timestamp} ({close_reason})")
+        print(f"Close Date: {close_timestamp} ({close_reason}) | Und: ${close_underlying_price:.2f}")
         print(f"Entry Cash Flow: ${entry_cash_flow:.2f}")
         print("Leg Prices at Open:")
         for leg in legs:

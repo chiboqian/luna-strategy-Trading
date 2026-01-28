@@ -337,6 +337,7 @@ def main():
         kwargs = {'legs': legs, 'quantity': args.quantity, 'time_in_force': 'day', 'order_class': 'mleg'}
         if isinstance(client, MockOptionClient):
             kwargs['entry_cash_flow'] = entry_cash_flow
+            kwargs['underlying_price'] = current_price
         
         response = client.place_option_market_order(**kwargs)
             

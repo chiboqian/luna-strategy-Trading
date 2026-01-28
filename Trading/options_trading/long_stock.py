@@ -180,7 +180,8 @@ def main():
                 "filled_avg_price": exec_price,
                 "side": "buy",
                 "legs": legs, # Include legs for close_mock_order compatibility
-                "entry_cash_flow": entry_cash_flow
+                "entry_cash_flow": entry_cash_flow,
+                "underlying_price": current_price
             }
             if args.save_order:
                 with open(args.save_order, 'w') as f:
