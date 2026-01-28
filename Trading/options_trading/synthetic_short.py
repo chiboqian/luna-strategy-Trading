@@ -413,9 +413,6 @@ def main():
                 metrics['max_loss'] = float('inf')
             
             # Break Even = PutStrike - NetPremium (approx)
-            # More accurately: Strike - NetDebit (if debit) or Strike + NetCredit (if credit)
-            # Since total_premium is Debit (positive) or Credit (negative):
-            # BE = PutStrike - total_premium
             metrics['break_even'] = put_strike - total_premium
             
             # --- Auto-Calculate Quantity if --amount is used ---

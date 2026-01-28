@@ -140,8 +140,12 @@ class MockOptionClient:
         """Parses OCC symbols (e.g. AAPL230616C00150000) into metadata columns."""
         # Regex: Root(chars) + Date(6 digits) + Type(C/P) + Strike(8 digits)
         # Make regex case insensitive for root and type
-        # Allow spaces between root and date (common in some data feeds)
-        extracted = self.df['symbol'].str.extract(r'^([a-zA-Z]+)\s*(\d{6})([cCpP])(\d{8})$')
+        # Allow spaces between root and date, and trailing characters
+        
+        # Ensure symbol column is string and stripped of whitespace
+        self.df['symbol'] = self.df['symbol'].astype(str).str.strip()
+        
+        extracted = self.df['symbol'].str.extract(r'^([a-zA-Z]+)\s*(\d{6})([cCpP])(\d{8})')
         if not extracted.empty:
             if self.col_map['root'] not in self.df.columns:
                 self.df[self.col_map['root']] = extracted[0].str.upper()
