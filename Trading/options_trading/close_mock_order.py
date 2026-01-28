@@ -119,18 +119,29 @@ def main():
             day_df = df[df[date_col].astype(str).str.startswith(date_str)].copy()
             
         return day_df, date_col
+    
+    # Determine if stock order
+    is_stock_order = False
+    if order.get('asset_class') == 'us_equity':
+        is_stock_order = True
+    elif legs and len(legs) > 0 and len(legs[0].get('symbol', '')) < 6:
+        is_stock_order = True
 
-    # Load Primary Data (Options)
+    # Load Primary Data
+    # Optimization: For stock orders, prefer underlying file if available to avoid loading large options files
+    primary_source = args.underlying if (is_stock_order and args.underlying) else args.historical
+    
     try:
-        day_df, date_col = load_data_source(args.historical, args.date, args.begin_time)
+        day_df, date_col = load_data_source(primary_source, args.date, args.begin_time)
     except Exception as e:
-        print(f"Error loading historical file: {e}", file=sys.stderr)
+        print(f"Error loading primary data file ({primary_source}): {e}", file=sys.stderr)
         sys.exit(1)
         
-    # Load Underlying Data (Optional)
+    # Load Secondary Data (Underlying) - Only if we didn't use it as primary
     underlying_df = None
     underlying_date_col = None
-    if args.underlying:
+    
+    if args.underlying and primary_source != args.underlying:
         try:
             underlying_df, underlying_date_col = load_data_source(args.underlying, args.date, args.begin_time)
             print(f"Loaded underlying data: {len(underlying_df)} rows", file=sys.stderr)
