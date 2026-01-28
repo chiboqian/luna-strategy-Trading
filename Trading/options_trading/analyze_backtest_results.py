@@ -13,7 +13,7 @@ import pandas as pd
 import sys
 from pathlib import Path
 
-def analyze_results(directory: str, output_csv: str = None):
+def analyze_results(directory: str, output_csv: str = None, max_profit: float = None, max_loss: float = None, max_profit_pct: float = None, max_loss_pct: float = None):
     p = Path(directory)
     if not p.exists() or not p.is_dir():
         print(f"Error: Directory {directory} not found.", file=sys.stderr)
@@ -63,6 +63,38 @@ def analyze_results(directory: str, output_csv: str = None):
         
     df = pd.DataFrame(data)
     
+    # Calculate Basis and Multiplier for Percentage Caps
+    # Heuristic: Derive multiplier from Total PnL / (Unit PnL * Qty) if possible
+    def get_multiplier(row):
+        if abs(row['unit_pnl']) > 0.0001 and row['quantity'] > 0:
+            m = row['total_pnl'] / (row['unit_pnl'] * row['quantity'])
+            if abs(m - 1) < 0.1: return 1.0
+            if abs(m - 100) < 10.0: return 100.0
+        # Default to 100 (Options) if undetermined, unless entry cost looks like a stock price (> $10 and no decimals? hard to say)
+        return 100.0
+
+    df['multiplier'] = df.apply(get_multiplier, axis=1)
+    # Basis is the absolute initial cash flow (Cost for Debit, Credit for Credit strategies)
+    df['basis'] = (df['entry_cost'] * df['quantity'] * df['multiplier']).abs()
+
+    # Apply scenario caps if provided
+    if max_profit is not None:
+        print(f"Scenario: Capping max profit at ${max_profit:.2f}")
+        df['total_pnl'] = df['total_pnl'].apply(lambda x: min(x, max_profit) if x > 0 else x)
+        
+    if max_loss is not None:
+        loss_limit = -abs(max_loss)
+        print(f"Scenario: Capping max loss at ${abs(max_loss):.2f}")
+        df['total_pnl'] = df['total_pnl'].apply(lambda x: max(x, loss_limit) if x < 0 else x)
+
+    if max_profit_pct is not None:
+        print(f"Scenario: Capping max profit at {max_profit_pct*100:.1f}% of basis")
+        df['total_pnl'] = df.apply(lambda row: min(row['total_pnl'], row['basis'] * max_profit_pct) if row['total_pnl'] > 0 else row['total_pnl'], axis=1)
+
+    if max_loss_pct is not None:
+        print(f"Scenario: Capping max loss at {max_loss_pct*100:.1f}% of basis")
+        df['total_pnl'] = df.apply(lambda row: max(row['total_pnl'], -(row['basis'] * max_loss_pct)) if row['total_pnl'] < 0 else row['total_pnl'], axis=1)
+    
     # Sort by date
     if 'close_date' in df.columns:
         df['close_date'] = pd.to_datetime(df['close_date'], format='mixed', utc=True)
@@ -95,7 +127,7 @@ def analyze_results(directory: str, output_csv: str = None):
         
         open_str = row.get('open_date', 'N/A')
         
-        initial_cash = row['entry_cost'] * row['quantity'] * 100
+        initial_cash = row['entry_cost'] * row['quantity'] * row['multiplier']
         result = "WIN" if row['total_pnl'] > 0 else "LOSS" if row['total_pnl'] < 0 else "FLAT"
         pct = (row['total_pnl'] / abs(initial_cash)) * 100 if initial_cash != 0 else 0.0
         reason = str(row.get('close_reason', 'N/A'))
@@ -175,9 +207,13 @@ def main():
     parser = argparse.ArgumentParser(description="Analyze backtest P&L files")
     parser.add_argument("--dir", required=True, help="Directory containing pnl_*.json files")
     parser.add_argument("--output", help="Path to save summary CSV (default: analysis_summary.csv in dir)")
+    parser.add_argument("--max-profit", type=float, help="Scenario: Cap max profit per trade")
+    parser.add_argument("--max-loss", type=float, help="Scenario: Cap max loss per trade (positive number)")
+    parser.add_argument("--max-profit-pct", type=float, help="Scenario: Cap max profit as %% of basis (e.g. 0.5 for 50%%)")
+    parser.add_argument("--max-loss-pct", type=float, help="Scenario: Cap max loss as %% of basis (e.g. 0.2 for 20%%)")
     args = parser.parse_args()
     
-    analyze_results(args.dir, args.output)
+    analyze_results(args.dir, args.output, args.max_profit, args.max_loss, args.max_profit_pct, args.max_loss_pct)
 
 if __name__ == "__main__":
     main()
