@@ -72,6 +72,10 @@ class MockOptionClient:
         if 'expiration_date' in cols: self.col_map['expiration'] = 'expiration_date'
         if 'option_type' in cols: self.col_map['type'] = 'option_type'
         
+        # If loading stock data directly (no contract_id), map root to symbol for filtering
+        if 'symbol' in cols and 'contract_id' not in cols and 'root' not in cols:
+            self.col_map['root'] = 'symbol'
+        
         # Databento mapping
         if 'bid_px_00' in cols: self.col_map['bid'] = 'bid_px_00'
         if 'ask_px_00' in cols: self.col_map['ask'] = 'ask_px_00'

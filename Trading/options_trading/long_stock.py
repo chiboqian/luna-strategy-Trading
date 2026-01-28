@@ -84,10 +84,11 @@ def main():
     else:
         reference_date = datetime.now()
 
-    mock_file = args.historical or args.underlying
-    if mock_file:
-        primary_file = args.historical if args.historical else args.underlying
-        secondary_file = args.underlying if args.historical else None
+    # For long_stock, we primarily need underlying data. 
+    # Prioritize args.underlying to avoid loading large options files from args.historical
+    primary_file = args.underlying if args.underlying else args.historical
+    if primary_file:
+        secondary_file = None # No need for secondary if we have what we need
         client = MockOptionClient(primary_file, reference_date, args.save_order, secondary_file)
     else:
         client = AlpacaClient()
