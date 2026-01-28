@@ -140,6 +140,20 @@ def main():
     print(f"Strategy: {args.strategy}")
     print(f"Management: TP={tp_pct}, SL={sl_pct}")
     
+    # Create descriptive subdirectory name
+    # Format: {strategy}_{symbol}_{start}_{end}_tp{tp}_sl{sl}_{extra_args_hash}
+    # We'll use a simple string for extra args to keep it readable but unique enough
+    safe_args = args.strategy_args.replace(" ", "_").replace("-", "").replace("=", "")
+    if len(safe_args) > 50: safe_args = safe_args[:50] # Truncate if too long
+    
+    sub_dir_name = f"{args.strategy}_{args.symbol}_{args.start_date}_{args.end_date}_tp{tp_pct}_sl{sl_pct}"
+    if safe_args:
+        sub_dir_name += f"_{safe_args}"
+        
+    final_output_dir = output_dir / sub_dir_name
+    final_output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output Directory: {final_output_dir}")
+
     # Generate Schedule
     print(f"Generating schedule from {args.start_date} to {args.end_date}...")
     try:
@@ -164,7 +178,7 @@ def main():
         
         # 1. Open Position
         open_str_safe = open_str.replace(" ", "_").replace(":", "")
-        order_file = output_dir / f"order_{open_str_safe}.json"
+        order_file = final_output_dir / f"order_{open_str_safe}.json"
         
         # Build Open Command
         cmd_open = [
@@ -235,7 +249,7 @@ def main():
             
         # 2. Close Position
         close_str_safe = close_str.replace(" ", "_").replace(":", "")
-        pnl_file = output_dir / f"pnl_{open_str_safe}_to_{close_str_safe}.json"
+        pnl_file = final_output_dir / f"pnl_{open_str_safe}_to_{close_str_safe}.json"
         
         cmd_close = [
             sys.executable, str(close_script),
@@ -297,7 +311,7 @@ def main():
     # Final Summary
     if results:
         df = pd.DataFrame(results)
-        summary_file = output_dir / "backtest_summary.csv"
+        summary_file = final_output_dir / "backtest_summary.csv"
         df.to_csv(summary_file, index=False)
         
         total_pnl = df['pnl'].sum()
