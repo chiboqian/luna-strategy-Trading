@@ -435,7 +435,7 @@ class OptionStrategyScanner:
                 
         return pd.DataFrame(valid_data)
 
-    def analyze_momentum(self, symbol: str, verbose: bool = False) -> Tuple[bool, float, float]:
+    def analyze_momentum(self, symbol: str, trend_view: str = "bullish", verbose: bool = False) -> Tuple[bool, float, float]:
         """
         Calculates RSI, Moving Averages, MACD, ADX, and Volume.
         Returns (Pass/Fail, RSI Value, HV20).
@@ -587,11 +587,20 @@ class OptionStrategyScanner:
             min_rel_volume = self.scan_opts.get('min_rel_volume', 0.8)  # Min relative volume (80% of avg)
             require_macd_bullish = self.scan_opts.get('require_macd_bullish', True)  # MACD above signal
 
-            trend_check = (price > sma50) and (sma50 > sma200)
-            rsi_check = rsi_min < rsi < rsi_max
+            if trend_view == "bullish":
+                trend_check = (price > sma50) and (sma50 > sma200)
+                rsi_check = rsi_min < rsi < rsi_max
+                macd_check = macd_bullish if require_macd_bullish else True
+            elif trend_view == "bearish":
+                trend_check = (price < sma50) and (sma50 < sma200)
+                # For bearish, we want RSI < 50 (downtrend) but not oversold (<30) ideally, or just < 60
+                rsi_check = rsi < 60 
+                macd_check = not macd_bullish if require_macd_bullish else True
+            else:
+                trend_check = True; rsi_check = True; macd_check = True
+
             adx_check = adx >= min_adx if not np.isnan(adx) else True  # Pass if ADX unavailable
             volume_check = rel_volume >= min_rel_volume
-            macd_check = macd_bullish if require_macd_bullish else True
             
             if verbose:
                 print(f"  [Detail] Momentum Metrics for {symbol}:")
@@ -772,7 +781,7 @@ class OptionStrategyScanner:
             if verbose: print(f"  [Detail] Earnings Check Failed (Ignored): {e}")
             return True
 
-    def analyze_volatility_skew(self, symbol: str, spot_price: float, hv20: float = 0.0, verbose: bool = False) -> Optional[Dict]:
+    def analyze_volatility_skew(self, symbol: str, spot_price: float, hv20: float = 0.0, verbose: bool = False, strategy: str = "synthetic_long") -> Optional[Dict]:
         """
         The Core Engine: Fetches Option Chain, solves for IV, calculates Skew.
         Target: Flat Skew & Low IV.
@@ -995,7 +1004,17 @@ class OptionStrategyScanner:
             # Cost = Call Ask - Put Bid
             # Delta = Call Delta - Put Delta (Short Put -> -(-Delta) -> +Delta)
             
-            synthetic_cost = target_call_row['ask'] - target_put_row['bid']
+            if strategy == "synthetic_long":
+                # Long Call, Short Put
+                entry_cost = target_call_row['ask'] - target_put_row['bid']
+            elif strategy == "synthetic_short":
+                # Long Put, Short Call
+                entry_cost = target_put_row['ask'] - target_call_row['bid']
+            elif strategy == "short_call":
+                # Short Call
+                entry_cost = -target_call_row['bid'] # Credit
+            else:
+                entry_cost = 0.0
             
             # Solve IV for target strike options
             target_call_iv = BlackScholesSolver.implied_volatility(
@@ -1010,23 +1029,52 @@ class OptionStrategyScanner:
             target_call_delta = BlackScholesSolver.delta(spot_price, target_strike, T, self.rf_rate, target_call_iv, 'c')
             target_put_delta = BlackScholesSolver.delta(spot_price, target_strike, T, self.rf_rate, target_put_iv, 'p')
                 
-            net_delta = target_call_delta - target_put_delta # Long Call (+), Short Put (-) -> Delta - (-Delta) = Sum
+            if strategy == "synthetic_long":
+                net_delta = target_call_delta - target_put_delta # Long Call (+), Short Put (-) -> Delta - (-Delta) = Sum
+            elif strategy == "synthetic_short":
+                net_delta = target_put_delta - target_call_delta # Long Put (-), Short Call (-) -> -Delta - Delta = -Sum
+            elif strategy == "short_call":
+                net_delta = -target_call_delta
+            else:
+                net_delta = 0.0
             
             # 5d. Calculate Greeks for Risk Assessment
             # Theta: Daily time decay (Long Call loses, Short Put gains)
             call_theta = BlackScholesSolver.theta(spot_price, target_strike, T, self.rf_rate, target_call_iv, 'c')
             put_theta = BlackScholesSolver.theta(spot_price, target_strike, T, self.rf_rate, target_put_iv, 'p')
-            net_theta = call_theta - put_theta  # Short put theta is negated
+            
+            if strategy == "synthetic_long":
+                net_theta = call_theta - put_theta  # Short put theta is negated
+            elif strategy == "synthetic_short":
+                net_theta = put_theta - call_theta # Long Put (neg), Short Call (pos)
+            elif strategy == "short_call":
+                net_theta = -call_theta # Short Call (pos)
+            else:
+                net_theta = 0.0
             
             # Gamma: Acceleration of delta (same for both legs, additive)
             call_gamma = BlackScholesSolver.gamma(spot_price, target_strike, T, self.rf_rate, target_call_iv)
             put_gamma = BlackScholesSolver.gamma(spot_price, target_strike, T, self.rf_rate, target_put_iv)
-            net_gamma = call_gamma + put_gamma  # Both contribute positively to synthetic
+            
+            if strategy in ["synthetic_long", "synthetic_short"]:
+                net_gamma = call_gamma + put_gamma
+            elif strategy == "short_call":
+                net_gamma = -call_gamma
+            else:
+                net_gamma = 0.0
             
             # Vega: IV sensitivity (Long Call + Short Put both have vega exposure)
             call_vega = BlackScholesSolver.vega(spot_price, target_strike, T, self.rf_rate, target_call_iv)
             put_vega = BlackScholesSolver.vega(spot_price, target_strike, T, self.rf_rate, target_put_iv)
-            net_vega = call_vega - put_vega  # Short put vega is negated
+            
+            if strategy == "synthetic_long":
+                net_vega = call_vega - put_vega
+            elif strategy == "synthetic_short":
+                net_vega = put_vega - call_vega
+            elif strategy == "short_call":
+                net_vega = -call_vega
+            else:
+                net_vega = 0.0
             
             # 5e. Put-Call Parity Check (Arbitrage Detection)
             # C - P = S - K*e^(-rT) (for same strike)
@@ -1043,13 +1091,13 @@ class OptionStrategyScanner:
             
             # 5g. Break-even Analysis
             # Break-even = Strike + Net Debit (for synthetic)
-            breakeven = target_strike + synthetic_cost
+            breakeven = target_strike + entry_cost
             breakeven_pct = (breakeven - spot_price) / spot_price * 100
             
             # 5h. Cost Efficiency vs Stock
             # Compare capital required: Synthetic vs buying 100 shares
             stock_cost = spot_price * 100
-            synthetic_capital = (synthetic_cost * 100) + (margin_estimate * 100)  # Debit + Margin
+            synthetic_capital = (entry_cost * 100) + (margin_estimate * 100)  # Debit + Margin
             capital_efficiency = (1 - synthetic_capital / stock_cost) * 100 if stock_cost > 0 else 0
             
             # 5i. Max Loss Calculation (for risk management)
@@ -1057,7 +1105,7 @@ class OptionStrategyScanner:
             # But practical max loss with stop = Strike - Stop_Price + Debit
             # For now, calculate max loss if stock drops 20% (protective scenario)
             protective_drop_pct = 0.20
-            max_loss_scenario = (spot_price * protective_drop_pct * 100) + (synthetic_cost * 100)
+            max_loss_scenario = (spot_price * protective_drop_pct * 100) + (entry_cost * 100)
             
             # 5j. Risk/Reward Ratio
             # Expected gain if stock rises 10% vs max loss scenario
@@ -1092,8 +1140,11 @@ class OptionStrategyScanner:
             
             # Theta check: daily decay shouldn't exceed X% of synthetic capital
             theta_pct = abs(net_theta) / (synthetic_capital / 100) if synthetic_capital > 0 else 0
-            pass_theta = theta_pct <= max_theta_pct
-            pass_delta = net_delta >= min_delta
+            pass_theta = theta_pct <= max_theta_pct # For long strategies, we pay theta. For short, we earn it.
+            if strategy in ["synthetic_short", "short_call"]:
+                pass_delta = net_delta <= -min_delta # Expect negative delta
+            else:
+                pass_delta = net_delta >= min_delta
             
             # 5o. Term Structure Analysis (Contango vs Backwardation)
             # Compare ATM IV of selected expiration vs a longer-dated expiration
@@ -1154,7 +1205,7 @@ class OptionStrategyScanner:
             if verbose:
                 print(f"  [Detail] OTM Put IV: {otm_put_iv:.4f}")
                 print(f"  [Detail] OTM Call IV: {otm_call_iv:.4f}")
-                print(f"  [Detail] Synthetic Cost: ${synthetic_cost:.2f} (Debit to Enter)")
+                print(f"  [Detail] Entry Cost: ${entry_cost:.2f}")
                 print(f"  [Detail] Net Delta: {net_delta:.2f} (Target ~1.0)")
                 print(f"  [Detail] Net Theta: ${net_theta:.2f}/day (Time Decay)")
                 print(f"  [Detail] Net Gamma: {net_gamma:.4f} (Delta Acceleration)")
@@ -1227,7 +1278,7 @@ class OptionStrategyScanner:
                     'iv_pctl': round(iv_pctl, 0),
                     'term_structure': term_structure,
                     'skew': round(skew, 4),
-                    'syn_cost': round(synthetic_cost, 2),
+                    'syn_cost': round(entry_cost, 2),
                     'net_delta': round(net_delta, 3),
                     'theta': round(net_theta, 2),
                     'theta_pct': round(theta_pct * 100, 2),  # Theta as % of capital
@@ -1386,7 +1437,7 @@ class OptionStrategyScanner:
             print(f"[{index+1}/{total}] Scanning {sym} (${price:.2f})... ", end="", flush=True)
             if is_verbose: print("") # New line for detail
 
-            if strategy == "synthetic_long":
+            if strategy in ["synthetic_long", "synthetic_short", "short_call"]:
                 # Initialize failure tracking
                 failure_reason = None
                 rsi = 0.0
@@ -1420,7 +1471,11 @@ class OptionStrategyScanner:
                          continue
                     
                 # Step 4: Momentum Check
-                pass_mom, rsi, hv20 = self.analyze_momentum(sym, verbose=is_verbose)
+                trend_view = "bullish"
+                if strategy in ["synthetic_short", "short_call"]:
+                    trend_view = "bearish"
+                
+                pass_mom, rsi, hv20 = self.analyze_momentum(sym, trend_view=trend_view, verbose=is_verbose)
                 
                 # Get momentum details for failed table
                 adx_val = getattr(self, '_last_adx', 0.0) if hasattr(self, '_last_adx') else '-'
@@ -1443,7 +1498,7 @@ class OptionStrategyScanner:
                     print(f"  [Detail] Momentum PASS. Checking Options...")
                 
                 # Step 5: Volatility/Skew Analysis
-                vol_metrics = self.analyze_volatility_skew(sym, price, hv20, verbose=is_verbose)
+                vol_metrics = self.analyze_volatility_skew(sym, price, hv20, verbose=is_verbose, strategy=strategy)
                 
                 passed_all = pass_div and pass_earn and pass_mom and (vol_metrics is not None)
 
@@ -1553,7 +1608,7 @@ class OptionStrategyScanner:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-Strategy Option Scanner")
     parser.add_argument("--strategy", type=str, 
-                        choices=["synthetic_long"],
+                        choices=["synthetic_long", "synthetic_short", "short_call"],
                         help="Scan strategy to execute (default: read from config)")
     parser.add_argument("--limit", type=int, help="Limit the number of stocks to scan (overrides config)")
     parser.add_argument("--symbol", type=str, nargs='+', help="Scan specific stock symbol(s) and show detailed metrics")

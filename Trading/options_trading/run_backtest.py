@@ -28,7 +28,9 @@ STRATEGY_DEFAULTS = {
     "iron_condor": {"tp": 0.5, "sl": 1.0},
     "straddle": {"tp": 0.25, "sl": 0.15},
     "long_call": {"tp": 0.5, "sl": 0.3},
-    "long_stock": {"tp": 0.1, "sl": 0.05}
+    "short_call": {"tp": 0.5, "sl": 1.0},
+    "long_stock": {"tp": 0.1, "sl": 0.05},
+    "synthetic_short": {"tp": 0.5, "sl": 0.4}
 }
 
 def get_backtest_schedule(start_date, end_date, hold_days=None, every_day=False):
@@ -94,7 +96,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run backtest cycle")
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor", "straddle", "long_call", "long_stock"], help="Strategy to run")
+    parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor", "straddle", "long_call", "short_call", "long_stock", "synthetic_short"], help="Strategy to run")
     parser.add_argument("--symbol", required=True, help="Symbol (e.g. SPY)")
     parser.add_argument("--historical", required=True, help="Path to historical data file or dataset directory")
     parser.add_argument("--underlying", help="Path to underlying data file or dataset directory")
@@ -177,8 +179,8 @@ def main():
         if args.underlying:
             cmd_open.extend(["--underlying", args.underlying])
         
-        # Default to limit order (mid-price) for long_call and long_stock
-        if args.strategy in ["long_call", "long_stock"]:
+        # Default to limit order (mid-price) for long_call, short_call and long_stock
+        if args.strategy in ["long_call", "short_call", "long_stock"]:
             cmd_open.append("--limit-order")
         
         # Add strategy specific args
