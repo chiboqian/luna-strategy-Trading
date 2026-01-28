@@ -306,6 +306,13 @@ def main():
         win_rate = wins / len(df) if len(df) > 0 else 0
         
         print("\n" + "="*40)
+        print(f"{'Session Start':<20} | {'P&L':>12} | {'Result':<6}")
+        print("-" * 40)
+        for _, row in df.iterrows():
+            res_label = "WIN" if row['pnl'] > 0 else "LOSS" if row['pnl'] < 0 else "FLAT"
+            print(f"{row['open_date']:<20} | ${row['pnl']:>11.2f} | {res_label:<6}")
+            
+        print("\n" + "="*40)
         print(f"Backtest Complete: {args.symbol} ({args.strategy})")
         print(f"Total Trades: {len(df)}")
         print(f"Total P&L:    ${total_pnl:.2f}")

@@ -32,11 +32,22 @@ def analyze_results(directory: str, output_csv: str = None):
             with open(f, 'r') as fp:
                 d = json.load(fp)
                 
+                # Try to parse open date from filename: pnl_OPEN_to_CLOSE.json
+                open_date = "N/A"
+                try:
+                    # Remove pnl_ prefix and .json suffix
+                    name_parts = f.stem[4:].split('_to_')
+                    if len(name_parts) >= 1:
+                        open_date = name_parts[0].replace('_', ' ')
+                except:
+                    pass
+                
                 row = {
                     'file': f.name,
                     'close_date': d.get('close_date'),
                     'close_reason': d.get('close_reason', 'N/A'),
                     'total_pnl': float(d.get('total_pnl', 0.0)),
+                    'open_date': open_date,
                     'entry_cost': float(d.get('entry_cash_flow', 0.0)),
                     'exit_credit': float(d.get('exit_cash_flow', 0.0)),
                     'quantity': float(d.get('quantity', 0)),
@@ -67,11 +78,11 @@ def analyze_results(directory: str, output_csv: str = None):
     print(f"Saved summary CSV to: {out_path}")
     
     # Trade History
-    print("\n" + "="*90)
+    print("\n" + "="*110)
     print("Trade History")
-    print("="*90)
-    print(f"{'Date':<19} | {'Cost/Credit':>12} | {'P&L':>12} | {'%':>8} | {'Result':<6} | {'Reason':<20}")
-    print("-" * 90)
+    print("="*110)
+    print(f"{'Open Date':<19} | {'Close Date':<19} | {'Cost/Credit':>12} | {'P&L':>12} | {'%':>8} | {'Result':<6} | {'Reason':<20}")
+    print("-" * 110)
     
     for _, row in df.iterrows():
         date_str = "N/A"
@@ -82,11 +93,13 @@ def analyze_results(directory: str, output_csv: str = None):
             else:
                 date_str = ts.strftime('%Y-%m-%d %H:%M')
         
+        open_str = row.get('open_date', 'N/A')
+        
         initial_cash = row['entry_cost'] * row['quantity'] * 100
         result = "WIN" if row['total_pnl'] > 0 else "LOSS" if row['total_pnl'] < 0 else "FLAT"
         pct = (row['total_pnl'] / abs(initial_cash)) * 100 if initial_cash != 0 else 0.0
         reason = str(row.get('close_reason', 'N/A'))
-        print(f"{date_str:<19} | ${initial_cash:>11.2f} | ${row['total_pnl']:>11.2f} | {pct:>7.1f}% | {result:<6} | {reason:<20}")
+        print(f"{open_str:<19} | {date_str:<19} | ${initial_cash:>11.2f} | ${row['total_pnl']:>11.2f} | {pct:>7.1f}% | {result:<6} | {reason:<20}")
 
     # Analysis
     total_trades = len(df)
