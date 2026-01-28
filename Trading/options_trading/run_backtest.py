@@ -215,6 +215,18 @@ def main():
             
         if not order_file.exists():
             print(f"  ❌ Order file not created for {open_str}")
+            if res_open:
+                # Try to extract error message from JSON output
+                try:
+                    output_json = json.loads(res_open.stdout)
+                    if 'error' in output_json:
+                        print(f"     Error: {output_json['error']}")
+                    else:
+                        print(f"     Output: {res_open.stdout.strip()}")
+                except json.JSONDecodeError:
+                    print(f"     Output: {res_open.stdout.strip()}")
+                if res_open.stderr:
+                    print(f"     Stderr: {res_open.stderr.strip()}")
             continue
         
         # Debug: Print entry info
