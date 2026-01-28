@@ -38,6 +38,8 @@ def main():
         print(f"Error loading order file: {e}", file=sys.stderr)
         sys.exit(1)
 
+    legs = order.get('legs', [])
+
     def load_data_source(path_str, date_str, begin_time_str=None):
         path_input = Path(path_str)
         if path_input.is_dir():
@@ -194,7 +196,6 @@ def main():
     # For now, we'll check underlying_df if symbol not found in day_df
     # Note: step logic currently iterates day_df. If symbol is in underlying, we need to iterate that too.
 
-    legs = order.get('legs', [])
     quantity = float(order.get('quantity', 1))
     entry_cash_flow = float(order.get('entry_cash_flow', 0.0))
     print(f"[DEBUG] Entry Cash Flow from Order: {entry_cash_flow}", file=sys.stderr)
