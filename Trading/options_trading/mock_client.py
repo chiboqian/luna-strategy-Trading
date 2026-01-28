@@ -72,9 +72,10 @@ class MockOptionClient:
         if 'expiration_date' in cols: self.col_map['expiration'] = 'expiration_date'
         if 'option_type' in cols: self.col_map['type'] = 'option_type'
         
-        # If loading stock data directly (no contract_id), map root to symbol for filtering
+        # If loading stock data directly (no contract_id), map root to symbol for filtering.
+        # But only if it looks like stock data (short symbols). We'll defer this check or make it smarter.
         if 'symbol' in cols and 'contract_id' not in cols and 'root' not in cols:
-            self.col_map['root'] = 'symbol'
+            pass # Don't force map root to symbol yet, let parsing try to extract it first
         
         # Databento mapping
         if 'bid_px_00' in cols: self.col_map['bid'] = 'bid_px_00'
@@ -148,17 +149,25 @@ class MockOptionClient:
         extracted = self.df['symbol'].str.extract(r'^([a-zA-Z]+)\s*(\d{6})([cCpP])(\d{8})')
         if not extracted.empty:
             if self.col_map['root'] not in self.df.columns:
-                self.df[self.col_map['root']] = extracted[0].str.upper()
+                self.df['root_symbol'] = extracted[0].str.upper()
+                self.col_map['root'] = 'root_symbol'
             if self.col_map['expiration'] not in self.df.columns:
                 # Convert to string YYYY-MM-DD for consistency
-                self.df[self.col_map['expiration']] = pd.to_datetime(extracted[1], format='%y%m%d', errors='coerce').dt.strftime('%Y-%m-%d')
+                self.df['expiration_date'] = pd.to_datetime(extracted[1], format='%y%m%d', errors='coerce').dt.strftime('%Y-%m-%d')
+                self.col_map['expiration'] = 'expiration_date'
             if self.col_map['type'] not in self.df.columns:
-                self.df[self.col_map['type']] = extracted[2].str.upper().map({'C': 'call', 'P': 'put'})
+                self.df['option_type'] = extracted[2].str.upper().map({'C': 'call', 'P': 'put'})
+                self.col_map['type'] = 'option_type'
             if self.col_map['strike'] not in self.df.columns:
-                self.df[self.col_map['strike']] = extracted[3].astype(float) / 1000.0
+                self.df['strike_price'] = extracted[3].astype(float) / 1000.0
+                self.col_map['strike'] = 'strike_price'
             
             if self.col_map['root'] in self.df.columns and self.df[self.col_map['root']].isna().all() and not self.df.empty:
                 print(f"Debug: Symbol parsing failed for all rows. Sample symbol: '{self.df['symbol'].iloc[0]}'")
+        else:
+            # If extraction failed (empty), maybe it IS stock data?
+            if 'symbol' in self.df.columns and 'root' not in self.col_map:
+                 self.col_map['root'] = 'symbol'
 
     def _load_dataset(self, path_str: str, target_date: datetime, required: bool = True) -> Optional[pd.DataFrame]:
         path_input = Path(path_str)
