@@ -29,8 +29,10 @@ STRATEGY_DEFAULTS = {
     "straddle": {"tp": 0.25, "sl": 0.15},
     "long_call": {"tp": 0.5, "sl": 0.3},
     "short_call": {"tp": 0.5, "sl": 1.0},
+    "short_call": {"tp": 0.5, "sl": 1.0},
     "long_stock": {"tp": 0.1, "sl": 0.05},
-    "synthetic_short": {"tp": 0.5, "sl": 0.4}
+    "synthetic_short": {"tp": 0.5, "sl": 0.4},
+    "vertical_spread": {"tp": 0.5, "sl": 0.5}
 }
 
 def get_backtest_schedule(start_date, end_date, hold_days=None, every_day=False):
@@ -96,7 +98,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run backtest cycle")
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
-    parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor", "straddle", "long_call", "short_call", "long_stock", "synthetic_short"], help="Strategy to run")
+    parser.add_argument("--strategy", required=True, choices=["synthetic_long", "bull_put_spread", "iron_condor", "straddle", "long_call", "short_call", "long_stock", "synthetic_short", "vertical_spread"], help="Strategy to run")
     parser.add_argument("--symbol", required=True, help="Symbol (e.g. SPY)")
     parser.add_argument("--historical", required=True, help="Path to historical data file or dataset directory")
     parser.add_argument("--underlying", help="Path to underlying data file or dataset directory")
@@ -174,6 +176,27 @@ def main():
         
         print(f"Processing Session: Open {open_str} -> Close {close_str}")
         
+        # Check for data availability before running
+        # Construct expected file path (Parquet or Databento)
+        # This is a heuristic check; the strategy script does its own loading, but we can fail fast here.
+        data_path = Path(args.historical)
+        date_part = open_str.split(' ')[0]
+        year_str = date_part.split('-')[0]
+        
+        # Check for Parquet: folder/year/date.parquet
+        p_file = data_path / year_str / f"{date_part}.parquet"
+        # Check for Databento: folder/date_nodash.dbn.zst
+        dbn_date = date_part.replace('-', '')
+        d_file = data_path / f"{dbn_date}.dbn.zst"
+        
+        if data_path.is_dir():
+            if not p_file.exists() and not d_file.exists():
+                print(f"  ⚠️ Data file missing for {date_part}. Skipping session.")
+                continue
+        elif not data_path.exists():
+             print(f"  ⚠️ Historical data file {data_path} not found. Aborting.")
+             sys.exit(1)
+
         # 1. Open Position
         open_str_safe = open_str.replace(" ", "_").replace(":", "")
         order_file = output_dir / f"order_{open_str_safe}.json"
@@ -191,8 +214,8 @@ def main():
         if args.underlying:
             cmd_open.extend(["--underlying", args.underlying])
         
-        # Default to limit order (mid-price) for long_call, short_call and long_stock
-        if args.strategy in ["long_call", "short_call", "long_stock"]:
+        # Default to limit order (mid-price) for long_call, short_call, long_stock and vertical_spread
+        if args.strategy in ["long_call", "short_call", "long_stock", "vertical_spread"]:
             cmd_open.append("--limit-order")
         
         # Add strategy specific args
