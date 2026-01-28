@@ -140,6 +140,18 @@ def main():
     print(f"Strategy: {args.strategy}")
     print(f"Management: TP={tp_pct}, SL={sl_pct}")
     
+    # Create descriptive subdirectory name
+    safe_args = args.strategy_args.replace(" ", "_").replace("-", "").replace("=", "")
+    if len(safe_args) > 50: safe_args = safe_args[:50]
+    
+    sub_dir_name = f"{args.strategy}_{args.symbol}_{args.start_date}_{args.end_date}_tp{tp_pct}_sl{sl_pct}"
+    if safe_args:
+        sub_dir_name += f"_{safe_args}"
+        
+    output_dir = output_dir / sub_dir_name
+    output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Output Directory: {output_dir}")
+
     # Generate Schedule
     print(f"Generating schedule from {args.start_date} to {args.end_date}...")
     try:
