@@ -487,6 +487,41 @@ def main():
             
         metrics = calculate_group_metrics(legs)
         
+        # Fetch quotes for Bid/Ask context
+        quote_info = ""
+        try:
+            leg_symbols = [leg['symbol'] for leg in legs]
+            if leg_symbols:
+                snaps = client.get_option_snapshot(','.join(leg_symbols))
+                # Handle single result vs dict of dicts
+                if 'latestQuote' in snaps: 
+                    snaps = {leg_symbols[0]: snaps}
+                
+                agg_bid = 0.0
+                agg_ask = 0.0
+                
+                for leg in legs:
+                    qty = float(leg.get('qty', 0))
+                    sym = leg['symbol']
+                    snap = snaps.get(sym, {})
+                    quote = snap.get('latestQuote', {})
+                    l_bid = float(quote.get('bp', 0))
+                    l_ask = float(quote.get('ap', 0))
+                    
+                    if qty > 0:
+                        agg_bid += qty * l_bid * 100
+                        agg_ask += qty * l_ask * 100
+                    else:
+                        agg_bid += qty * l_ask * 100
+                        agg_ask += qty * l_bid * 100
+                
+                quote_info = f"Bid=${agg_bid:.2f}, Ask=${agg_ask:.2f}, "
+        except Exception:
+            pass
+        
+        if not args.json:
+            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] {root} {expiry.strftime('%Y-%m-%d')}: {quote_info}Price=${metrics['market_value']:.2f}, P/L=${metrics['unrealized_pl']:.2f} ({metrics['pl_pct']:.1%})")
+        
         # DTE Check
         dte = (expiry - now).days
         

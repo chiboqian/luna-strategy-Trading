@@ -267,6 +267,7 @@ def main():
         print(f"Expiration: {selected_exp}")
         print(f"Strike:     ${float(call_contract['strike_price']):.2f}")
         print(f"Premium:    ${price:.2f}")
+        print(f"Bid/Ask:    ${bid:.2f} / ${ask:.2f}")
         print(f"Total Cost: ${total_cost * 100:.2f} per contract")
         print(f"Quantity:   {args.quantity}")
 
