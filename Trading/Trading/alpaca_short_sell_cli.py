@@ -17,11 +17,23 @@ Rules:
 import argparse
 import json
 import os
+import logging
 import sys
+from datetime import datetime
+from pathlib import Path
+from typing import Optional
 
 import yaml
 
 from alpaca_client import AlpacaClient
+from logging_config import setup_logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("AlpacaShortSellCLI")
 
 
 def load_config():
@@ -113,6 +125,8 @@ def parse_args():
         action="store_true",
         help="Simulate order without executing"
     )
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/cli)")
+    parser.add_argument("--log-file", help="Log file name (default: alpaca_short_sell.log)")
     return parser.parse_args()
 
 
@@ -207,7 +221,7 @@ def get_best_price(client: AlpacaClient, symbol: str, feed: str, verbose: bool, 
 def output_error(message: str, use_text: bool, code: int = 1):
     """Output error message in JSON or text format and exit."""
     if use_text:
-        print(f"❌ {message}", file=sys.stderr)
+        logger.error(f"❌ {message}")
     else:
         print(json.dumps({"success": False, "error": message}))
     sys.exit(code)
@@ -216,7 +230,7 @@ def output_error(message: str, use_text: bool, code: int = 1):
 def output_info(message: str, use_text: bool):
     """Output info message (only in text mode)."""
     if use_text:
-        print(message)
+        logger.info(message)
 
 
 def main():
@@ -229,6 +243,8 @@ def main():
     stop_loss_pct = float(args.stop_loss_pct)
     take_profit_pct = float(args.take_profit_pct)
     use_text = args.text
+
+    setup_logging(args.log_dir, args.log_file, default_dir='trading_logs/cli', default_file='alpaca_short_sell.log')
 
     # Validate inputs
     if notional <= 0:
@@ -253,7 +269,7 @@ def main():
             position = None
         if position and position.get('symbol') == symbol:
             if use_text:
-                print(f"ℹ️ Position for {symbol} already exists; not placing short order.")
+                logger.info(f"ℹ️ Position for {symbol} already exists; not placing short order.")
             else:
                 print(json.dumps({"success": False, "error": f"Position for {symbol} already exists"}))
             sys.exit(0)
@@ -270,7 +286,7 @@ def main():
             output_info(f"🔄 Canceled {success_count} existing order(s) for {symbol}", use_text)
             if args.verbose and use_text:
                 for c in canceled:
-                    print(f"   Order {c['id']}: {c['status']}")
+                    logger.info(f"   Order {c['id']}: {c['status']}")
     except Exception as e:
         output_info(f"⚠️ Error canceling existing orders: {e}", use_text)
         # Continue anyway - not fatal
@@ -319,23 +335,23 @@ def main():
 
     # Display order summary (text mode only)
     if use_text:
-        print(f"\n📉 Preparing short order: {symbol} for ${notional:,.2f}")
-        print(f"   Current quote: bid ${bid:.2f} / ask ${ask:.2f}")
-        print(f"   Order type: {order_type}")
+        logger.info(f"📉 Preparing short order: {symbol} for ${notional:,.2f}")
+        logger.info(f"   Current quote: bid ${bid:.2f} / ask ${ask:.2f}")
+        logger.info(f"   Order type: {order_type}")
         if limit_price is not None:
-            print(f"   Limit price: ${limit_price:.2f} ({price_type} ${ref_price:.2f} + offset ${price_offset:.2f})")
+            logger.info(f"   Limit price: ${limit_price:.2f} ({price_type} ${ref_price:.2f} + offset ${price_offset:.2f})")
         else:
-            print(f"   Reference price: ${ref_price:.2f} ({price_type})")
-        print(f"   Quantity: {qty} shares (notional: ${theoretical_proceeds:.2f})")
-        print(f"   Stop loss: {stop_loss_pct:.2f}% -> ${stop_loss_price:.2f}")
-        print(f"   Take profit: {take_profit_pct:.2f}% -> ${take_profit_price:.2f}")
+            logger.info(f"   Reference price: ${ref_price:.2f} ({price_type})")
+        logger.info(f"   Quantity: {qty} shares (notional: ${theoretical_proceeds:.2f})")
+        logger.info(f"   Stop loss: {stop_loss_pct:.2f}% -> ${stop_loss_price:.2f}")
+        logger.info(f"   Take profit: {take_profit_pct:.2f}% -> ${take_profit_price:.2f}")
 
     # Place bracket order for short
     try:
         if args.dry_run:
             if use_text:
-                print(f"\n🔍 Dry run: Short order would be placed successfully!")
-                print(f"   Status: simulated")
+                logger.info(f"🔍 Dry run: Short order would be placed successfully!")
+                logger.info(f"   Status: simulated")
             else:
                 result = {
                     "success": True,
@@ -382,9 +398,9 @@ def main():
         status = order.get('status')
         
         if use_text:
-            print(f"\n✅ Short order placed successfully!")
-            print(f"   Order ID: {order_id}")
-            print(f"   Status: {status}")
+            logger.info(f"✅ Short order placed successfully!")
+            logger.info(f"   Order ID: {order_id}")
+            logger.info(f"   Status: {status}")
         else:
             result = {
                 "success": True,

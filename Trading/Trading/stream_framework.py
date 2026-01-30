@@ -13,6 +13,7 @@ from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from dotenv import load_dotenv
+from logging_config import setup_logging
 
 # Configure logging
 logging.basicConfig(
@@ -31,9 +32,12 @@ except ImportError:
     sys.exit(1)
 
 class StreamFramework:
-    def __init__(self, config_path: str):
+    def __init__(self, config_path: str, log_dir: Optional[str] = None, log_file: Optional[str] = None):
         load_dotenv()
         self.config = self._load_config(config_path)
+        
+        setup_logging(log_dir, log_file, self.config, default_dir='trading_logs/streaming', default_file='stream_framework.log')
+        
         self.api_key = os.getenv('ALPACA_API_KEY')
         self.secret_key = os.getenv('ALPACA_API_SECRET')
         
@@ -49,7 +53,9 @@ class StreamFramework:
         
         # Bar history: symbol -> deque of close prices
         self.bar_history = {}
-        self.history_file = Path("bar_history.json")
+        history_dir = Path("trading_logs/streaming")
+        history_dir.mkdir(parents=True, exist_ok=True)
+        self.history_file = history_dir / "bar_history.json"
         # Cooldown tracking: rule_name -> last_triggered_timestamp
         self.last_triggered = {}
         # Track rules that are one-off and have been triggered
@@ -444,6 +450,8 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Alpaca Streaming Framework")
     parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to rules config file")
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/streaming)")
+    parser.add_argument("--log-file", help="Log file name (default: stream_framework.log)")
     args = parser.parse_args()
 
     # Resolve config path
@@ -463,7 +471,7 @@ if __name__ == "__main__":
                  print(f"Error: Config file not found at {config_path}")
                  sys.exit(1)
 
-    framework = StreamFramework(str(config_path))
+    framework = StreamFramework(str(config_path), log_dir=args.log_dir, log_file=args.log_file)
     
     try:
         asyncio.run(framework.run())
