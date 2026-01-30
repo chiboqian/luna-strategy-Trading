@@ -67,7 +67,7 @@ rules:
       # Short Sell SPY
       command: "python Trading/Trading/alpaca_short_sell_cli.py upro 5000 --mid-price --stop-loss-pct 1 --take-profit-pct 1.5"
     cooldown: 3600
-rules:
+
   # Trend Monitor: QQQ Uptrend (Price > SMA 50)
   - name: "QQQ Uptrend"
     symbol: "QQQ"
