@@ -1978,8 +1978,8 @@ def main():
 
     # Save plan to log
     try:
-        log_dir = Path(__file__).parent.parent / "logs"
-        log_dir.mkdir(exist_ok=True)
+        log_dir = Path("trading_logs/strategies")
+        log_dir.mkdir(parents=True, exist_ok=True)
         log_file = log_dir / f"bull_put_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         log_file_path = str(log_file)
         with open(log_file, "w") as f:

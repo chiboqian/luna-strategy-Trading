@@ -20,6 +20,7 @@ import sys
 import argparse
 import json
 import yaml
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -33,10 +34,12 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
     from alpaca_client import AlpacaClient
+    from logging_config import setup_logging
 except ImportError:
     # Fallback if running from proper context
     try:
         from Trading.alpaca_client import AlpacaClient
+        from Trading.logging_config import setup_logging
     except ImportError:
         print("Error: Could not import AlpacaClient. Check python path.", file=sys.stderr)
         sys.exit(1)
@@ -49,6 +52,13 @@ except ImportError:
         from options_trading.mock_client import MockOptionClient
     except ImportError:
         pass
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("SyntheticLong")
 
 def get_closest_contract(contracts: List[Dict], target_strike: float, option_type: str) -> Optional[Dict]:
     """Finds the contract with strike price closest to target."""
@@ -94,8 +104,12 @@ def main():
     parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
     parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
     parser.add_argument("--json", action="store_true", help="Output JSON")
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/options)")
+    parser.add_argument("--log-file", help="Log file name (default: synthetic_long.log)")
     
     args = parser.parse_args()
+
+    setup_logging(args.log_dir, args.log_file, default_dir='trading_logs/options', default_file='synthetic_long.log')
 
     # Resolve defaults priority:
     # 1. Explicit Quantity (--quantity 5) -> Ignore amount (even default)
@@ -136,13 +150,13 @@ def main():
                 if p['symbol'] == symbol:
                     msg = f"Existing stock position in {symbol}. Skipping."
                     if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                    else: print(msg)
+                    else: logger.info(msg)
                     return
                 if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
                     if p['symbol'][:-15] == symbol:
                         msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
                         if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                        else: print(msg)
+                        else: logger.info(msg)
                         return
         except Exception as e:
             if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
@@ -595,6 +609,19 @@ def main():
 
     email_text_base = "\n".join(email_lines)
 
+    # Save plan to log
+    try:
+        log_dir = Path("trading_logs/strategies")
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = log_dir / f"synthetic_long_{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        with open(log_file, "w") as f:
+            f.write(email_text_base)
+            f.write(f"\n\nContext: Dry Run={args.dry_run}, Limit={args.limit_order}")
+        if not args.json:
+            print(f"\n📄 Plan Summary:  {log_file}")
+    except Exception:
+        pass
+
     if args.dry_run:
         # Add per-leg bid/ask/mid/spread info to each leg in JSON output
         detailed_legs = []
@@ -637,7 +664,7 @@ def main():
     # Execute
     if not args.json:
         order_type = "LIMIT" if args.limit_order else "MARKET"
-        print(f"\nSubmitting {order_type} order for {args.quantity}x structures...")
+        logger.info(f"Submitting {order_type} order for {args.quantity}x structures...")
         
     try:
         if args.limit_order:
@@ -670,9 +697,9 @@ def main():
         if args.json:
             print(json.dumps(result, indent=2))
         else:
-            print(f"Order Submitted Successfully!")
-            print(f"Order ID: {response.get('id')}")
-            print(f"Status: {response.get('status')}")
+            logger.info(f"Order Submitted Successfully!")
+            logger.info(f"Order ID: {response.get('id')}")
+            logger.info(f"Status: {response.get('status')}")
             # print(json.dumps(response, indent=2))
     except Exception as e:
         err = {"error": str(e), "email_text": email_text_base + f"\n\n❌ Execution Error: {str(e)}"}

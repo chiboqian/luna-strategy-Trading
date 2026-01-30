@@ -21,6 +21,7 @@ import sys
 import argparse
 import json
 import yaml
+import logging
 import math
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -48,10 +49,12 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
     from alpaca_client import AlpacaClient
+    from logging_config import setup_logging
 except ImportError:
     # Fallback if running from proper context
     try:
         from Trading.alpaca_client import AlpacaClient
+        from Trading.logging_config import setup_logging
     except ImportError:
         print("Error: Could not import AlpacaClient. Check python path.", file=sys.stderr)
         sys.exit(1)
@@ -64,6 +67,13 @@ except ImportError:
         from options_trading.mock_client import MockOptionClient
     except ImportError:
         pass
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("IronCondor")
 
 def get_closest_contract(contracts: List[Dict], target_strike: float, option_type: str) -> Optional[Dict]:
     filtered = [c for c in contracts if c['type'] == option_type]
@@ -210,8 +220,12 @@ def main():
     parser.add_argument("--underlying", type=str, help="Path to underlying data file (mock mode)")
     parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
     parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/options)")
+    parser.add_argument("--log-file", help="Log file name (default: iron_condor.log)")
     
     args = parser.parse_args()
+
+    setup_logging(args.log_dir, args.log_file, default_dir='trading_logs/options', default_file='iron_condor.log')
 
     if args.quantity is not None:
         args.amount = 0.0
@@ -245,13 +259,13 @@ def main():
                 if p['symbol'] == symbol:
                     msg = f"Existing stock position in {symbol}. Skipping."
                     if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                    else: print(msg)
+                    else: logger.info(msg)
                     return
                 if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
                     if p['symbol'][:-15] == symbol:
                         msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
                         if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                        else: print(msg)
+                        else: logger.info(msg)
                         return
         except Exception as e:
             if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
@@ -292,17 +306,17 @@ def main():
         return
 
     if not args.json:
-        print(f"Symbol: {symbol}")
-        print(f"Current Price: ${current_price:.2f}")
-        print(f"Target Delta: {args.short_delta}")
-        print(f"Wing Width: ${args.width}")
+        logger.info(f"Symbol: {symbol}")
+        logger.info(f"Current Price: ${current_price:.2f}")
+        logger.info(f"Target Delta: {args.short_delta}")
+        logger.info(f"Wing Width: ${args.width}")
 
     # 2. Find Options
     start_date = (reference_date + timedelta(days=args.days)).strftime("%Y-%m-%d")
     end_date = (reference_date + timedelta(days=args.days + args.window)).strftime("%Y-%m-%d")
 
     if not args.json:
-        print(f"Searching for contracts expiring >= {start_date}...")
+        logger.info(f"Searching for contracts expiring >= {start_date}...")
 
     try:
         # Wide range to catch wings
@@ -462,14 +476,14 @@ def main():
             args.quantity = max(1, int(args.amount // risk_per_spread))
             
     if not args.json:
-        print(f"\n--- Iron Condor Analysis ---")
-        print(f"Expiration: {selected_exp}")
-        print(f"Strikes: {l_put_strike:.1f}/{s_put_strike:.1f} P  ---  {s_call_strike:.1f}/{l_call_strike:.1f} C")
-        print(f"Net Credit: ${metrics['net_credit']:.2f} (Mid: ${metrics['mid_credit']:.2f})")
-        print(f"Max Loss:   ${metrics['max_loss']:.2f}")
-        print(f"Max Profit: ${metrics['max_profit']:.2f}")
-        print(f"POP:        {metrics['pop']:.1%}")
-        print(f"Quantity:   {args.quantity}")
+        logger.info(f"--- Iron Condor Analysis ---")
+        logger.info(f"Expiration: {selected_exp}")
+        logger.info(f"Strikes: {l_put_strike:.1f}/{s_put_strike:.1f} P  ---  {s_call_strike:.1f}/{l_call_strike:.1f} C")
+        logger.info(f"Net Credit: ${metrics['net_credit']:.2f} (Mid: ${metrics['mid_credit']:.2f})")
+        logger.info(f"Max Loss:   ${metrics['max_loss']:.2f}")
+        logger.info(f"Max Profit: ${metrics['max_profit']:.2f}")
+        logger.info(f"POP:        {metrics['pop']:.1%}")
+        logger.info(f"Quantity:   {args.quantity}")
         
         print_payoff_diagram(current_price, s_put_strike, l_put_strike, s_call_strike, l_call_strike, metrics['net_credit'])
 
@@ -481,12 +495,12 @@ def main():
                 "metrics": metrics
             }, indent=2))
         else:
-            print("\nDry Run Complete.")
+            logger.info("Dry Run Complete.")
         return
 
     # Execute
     if not args.json:
-        print(f"\nSubmitting order...")
+        logger.info("Submitting order...")
         
     try:
         if args.limit_order:
@@ -508,7 +522,7 @@ def main():
         if args.json:
             print(json.dumps({"status": "executed", "order": response}, indent=2))
         else:
-            print(f"Order Submitted: {response.get('id')}")
+            logger.info(f"Order Submitted: {response.get('id')}")
             
     except Exception as e:
         err = {"error": str(e)}

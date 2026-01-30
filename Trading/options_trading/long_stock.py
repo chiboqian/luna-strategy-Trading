@@ -13,6 +13,7 @@ Usage:
 import sys
 import argparse
 import json
+import logging
 import yaml
 from datetime import datetime
 from pathlib import Path
@@ -22,10 +23,12 @@ from typing import List, Dict, Optional
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
     from alpaca_client import AlpacaClient
+    from logging_config import setup_logging
 except ImportError:
     # Fallback if running from proper context
     try:
         from Trading.alpaca_client import AlpacaClient
+        from Trading.logging_config import setup_logging
     except ImportError:
         print("Error: Could not import AlpacaClient. Check python path.", file=sys.stderr)
         sys.exit(1)
@@ -38,6 +41,13 @@ except ImportError:
         from options_trading.mock_client import MockOptionClient
     except ImportError:
         pass
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("LongStock")
 
 def main():
     # Load Config
@@ -64,8 +74,12 @@ def main():
     parser.add_argument("--underlying", type=str, help="Path to underlying data file (mock mode)")
     parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
     parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/options)")
+    parser.add_argument("--log-file", help="Log file name (default: long_stock.log)")
     
     args = parser.parse_args()
+
+    setup_logging(args.log_dir, args.log_file, default_dir='trading_logs/options', default_file='long_stock.log')
 
     if args.quantity is not None:
         args.amount = 0.0
@@ -103,13 +117,13 @@ def main():
                 if p['symbol'] == symbol:
                     msg = f"Existing stock position in {symbol}. Skipping."
                     if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                    else: print(msg)
+                    else: logger.info(msg)
                     return
                 if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
                     if p['symbol'][:-15] == symbol:
                         msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
                         if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                        else: print(msg)
+                        else: logger.info(msg)
                         return
         except Exception as e:
             if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
@@ -147,8 +161,8 @@ def main():
         return
 
     if not args.json:
-        print(f"Symbol: {symbol}")
-        print(f"Current Price: ${current_price:.2f}")
+        logger.info(f"Symbol: {symbol}")
+        logger.info(f"Current Price: ${current_price:.2f}")
 
     # Determine execution price
     exec_price = current_price
@@ -164,9 +178,9 @@ def main():
             args.quantity = max(1, int(args.amount // exec_price))
 
     if not args.json:
-        print(f"Quantity: {args.quantity}")
-        print(f"Price:    ${exec_price:.2f} ({'Limit/Mid' if args.limit_order else 'Market'})")
-        print(f"Total Cost: ${exec_price * args.quantity:.2f}")
+        logger.info(f"Quantity: {args.quantity}")
+        logger.info(f"Price:    ${exec_price:.2f} ({'Limit/Mid' if args.limit_order else 'Market'})")
+        logger.info(f"Total Cost: ${exec_price * args.quantity:.2f}")
 
     legs = [{
         "symbol": symbol,
@@ -179,7 +193,7 @@ def main():
         if args.json:
             print(json.dumps({"status": "dry_run", "legs": legs, "cost": exec_price * args.quantity}, indent=2))
         else:
-            print("\nDry Run Complete.")
+            logger.info("Dry Run Complete.")
         return
 
     # Execute
@@ -206,7 +220,7 @@ def main():
                 with open(args.save_order, 'w') as f:
                     json.dump(response, f, indent=2)
                 if not args.json:
-                    print(f"Mock order saved to {args.save_order}")
+                    logger.info(f"Mock order saved to {args.save_order}")
         else:
             response = client.place_stock_order(
                 symbol=symbol, 
@@ -220,9 +234,9 @@ def main():
         if args.json:
             print(json.dumps({"status": "executed", "order": response}, indent=2))
         else:
-            print(f"Order Submitted: {response.get('id')}")
-            print(f"Purchased Share Price: ${exec_price:.2f}")
-            print(f"Total Cost: ${exec_price * args.quantity:.2f}")
+            logger.info(f"Order Submitted: {response.get('id')}")
+            logger.info(f"Purchased Share Price: ${exec_price:.2f}")
+            logger.info(f"Total Cost: ${exec_price * args.quantity:.2f}")
             
     except Exception as e:
         err = {"error": str(e)}

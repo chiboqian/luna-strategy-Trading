@@ -17,6 +17,7 @@ import sys
 import argparse
 import json
 import yaml
+import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -30,10 +31,12 @@ except ImportError:
 sys.path.insert(0, str(Path(__file__).parent.parent / "Trading"))
 try:
     from alpaca_client import AlpacaClient
+    from logging_config import setup_logging
 except ImportError:
     # Fallback if running from proper context
     try:
         from Trading.alpaca_client import AlpacaClient
+        from Trading.logging_config import setup_logging
     except ImportError:
         print("Error: Could not import AlpacaClient. Check python path.", file=sys.stderr)
         sys.exit(1)
@@ -46,6 +49,13 @@ except ImportError:
         from options_trading.mock_client import MockOptionClient
     except ImportError:
         pass
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("VerticalSpread")
 
 def get_closest_contract(contracts: List[Dict], target_strike: float, option_type: str) -> Optional[Dict]:
     """Finds the contract with strike price closest to target."""
@@ -89,8 +99,12 @@ def main():
     parser.add_argument("--underlying", type=str, help="Path to underlying data file (mock mode)")
     parser.add_argument("--date", type=str, help="Current date for simulation (YYYY-MM-DD)")
     parser.add_argument("--save-order", type=str, help="File to save mock order JSON")
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/options)")
+    parser.add_argument("--log-file", help="Log file name (default: vertical_spread.log)")
     
     args = parser.parse_args()
+
+    setup_logging(args.log_dir, args.log_file, default_dir='trading_logs/options', default_file='vertical_spread.log')
 
     if args.quantity is not None:
         args.amount = 0.0
@@ -124,13 +138,13 @@ def main():
                 if p['symbol'] == symbol:
                     msg = f"Existing stock position in {symbol}. Skipping."
                     if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                    else: print(msg)
+                    else: logger.info(msg)
                     return
                 if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
                     if p['symbol'][:-15] == symbol:
                         msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
                         if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
-                        else: print(msg)
+                        else: logger.info(msg)
                         return
         except Exception as e:
             if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
@@ -212,9 +226,9 @@ def main():
             short_target = strike2
 
     if not args.json:
-        print(f"Symbol: {symbol} (${current_price:.2f})")
-        print(f"Strategy: {args.direction.title()} {args.type.title()} Spread")
-        print(f"Targets: Long ${long_target:.2f}, Short ${short_target:.2f}")
+        logger.info(f"Symbol: {symbol} (${current_price:.2f})")
+        logger.info(f"Strategy: {args.direction.title()} {args.type.title()} Spread")
+        logger.info(f"Targets: Long ${long_target:.2f}, Short ${short_target:.2f}")
 
     # 3. Find Options
     start_date = (reference_date + timedelta(days=args.days)).strftime("%Y-%m-%d")
@@ -309,11 +323,11 @@ def main():
             args.quantity = max(1, int(args.amount // risk))
 
     if not args.json:
-        print(f"Expiration: {selected_exp}")
-        print(f"Long:  {long_leg['symbol']} (${long_price:.2f})")
-        print(f"Short: {short_leg['symbol']} (${short_price:.2f})")
-        print(f"Net {'Debit' if net_cost > 0 else 'Credit'}: ${abs(net_cost):.2f}")
-        print(f"Quantity: {args.quantity}")
+        logger.info(f"Expiration: {selected_exp}")
+        logger.info(f"Long:  {long_leg['symbol']} (${long_price:.2f})")
+        logger.info(f"Short: {short_leg['symbol']} (${short_price:.2f})")
+        logger.info(f"Net {'Debit' if net_cost > 0 else 'Credit'}: ${abs(net_cost):.2f}")
+        logger.info(f"Quantity: {args.quantity}")
 
     if args.dry_run:
         if args.json:
@@ -341,7 +355,7 @@ def main():
         if args.json:
             print(json.dumps({"status": "executed", "order": response}, indent=2))
         else:
-            print(f"Order Submitted: {response.get('id')}")
+            logger.info(f"Order Submitted: {response.get('id')}")
             
     except Exception as e:
         err = {"error": str(e)}

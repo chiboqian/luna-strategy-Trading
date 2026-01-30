@@ -17,6 +17,7 @@ Usage:
 import sys
 import argparse
 import json
+import logging
 import yaml
 import re
 import math
@@ -24,7 +25,14 @@ from datetime import datetime
 from pathlib import Path
 from datetime import timedelta
 from collections import defaultdict
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("ManageOptions")
 
 # Path setup
 root_dir = Path(__file__).parent.parent
@@ -32,6 +40,7 @@ sys.path.insert(0, str(root_dir))
 sys.path.insert(0, str(root_dir / "Trading"))
 try:
     from alpaca_client import AlpacaClient
+    from logging_config import setup_logging
 except ImportError:
     print("Error: Could not import AlpacaClient.", file=sys.stderr)
     sys.exit(1)
@@ -372,10 +381,10 @@ def run_mock_loop(args):
             
             if action == "CLOSE":
                 if not args.json:
-                    print(f"\n*** TRIGGERED {reason} ***")
-                    print(f"Time: {ts_dt}")
-                    print(f"P/L: ${metrics['unrealized_pl']:.2f} ({metrics['pl_pct']:.1%})")
-                    print(f"Initial Basis: ${metrics['basis']:.2f}")
+                    logger.info(f"*** TRIGGERED {reason} ***")
+                    logger.info(f"Time: {ts_dt}")
+                    logger.info(f"P/L: ${metrics['unrealized_pl']:.2f} ({metrics['pl_pct']:.1%})")
+                    logger.info(f"Initial Basis: ${metrics['basis']:.2f}")
                 
                 # Save result
                 result = {
@@ -429,12 +438,16 @@ def main():
     parser.add_argument("--historical", type=str, help="Path to historical data (mock mode)")
     parser.add_argument("--mock-position", type=str, help="Path to position JSON file (mock mode)")
     parser.add_argument("--start-date", type=str, help="Start date for mock execution (YYYY-MM-DD)")
+    parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/options)")
+    parser.add_argument("--log-file", help="Log file name (default: manage_options.log)")
     
     args = parser.parse_args()
 
     if args.historical and args.mock_position:
         run_mock_loop(args)
         return
+
+    setup_logging(args.log_dir, args.log_file, config, default_dir='trading_logs/options', default_file='manage_options.log')
 
     client = AlpacaClient()
     
@@ -520,7 +533,7 @@ def main():
             pass
         
         if not args.json:
-            print(f"[{now.strftime('%Y-%m-%d %H:%M:%S')}] {root} {expiry.strftime('%Y-%m-%d')}: {quote_info}Price=${metrics['market_value']:.2f}, P/L=${metrics['unrealized_pl']:.2f} ({metrics['pl_pct']:.1%})")
+            logger.info(f"{root} {expiry.strftime('%Y-%m-%d')}: {quote_info}Price=${metrics['market_value']:.2f}, P/L=${metrics['unrealized_pl']:.2f} ({metrics['pl_pct']:.1%})")
         
         # DTE Check
         dte = (expiry - now).days
@@ -571,7 +584,7 @@ def main():
         if args.dry_run:
             results.append({"status": "dry_run", "description": desc, "reason": act['reason']})
             if not args.json:
-                print(f"[Dry Run] Would CLOSE {desc}")
+                logger.info(f"[Dry Run] Would CLOSE {desc}")
                 print(f"  Reason: {act['reason']}")
                 print(f"  Metrics: Initial ${act['metrics']['net_initial']:.2f}, Current P/L ${act['metrics']['unrealized_pl']:.2f}")
         else:
@@ -581,7 +594,7 @@ def main():
                 try:
                     client.close_position(symbol)
                     if not args.json:
-                        print(f"Submitted CLOSE for {symbol}")
+                        logger.info(f"Submitted CLOSE for {symbol}")
                 except Exception as e:
                     errors.append(f"{symbol}: {str(e)}")
                     if not args.json:
@@ -597,7 +610,7 @@ def main():
     if args.json:
         print(json.dumps(results, indent=2))
     elif not results:
-        print(f"Scanned {len(positions)} positions ({len(groups)} groups). No adjustments needed.")
+        logger.info(f"Scanned {len(positions)} positions ({len(groups)} groups). No adjustments needed.")
 
 if __name__ == "__main__":
     main()

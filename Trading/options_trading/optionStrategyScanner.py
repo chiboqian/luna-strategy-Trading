@@ -23,6 +23,7 @@ import yaml
 import argparse
 import re
 from io import StringIO
+from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Union
 
 import pandas as pd
@@ -280,11 +281,13 @@ class OptionStrategyScanner:
         Fetches S&P 500, retrieves market caps, and returns the top N.
         Caches results for 7 days to avoid repeated scraping and API calls.
         """
-        CACHE_FILE = "sp500_market_cap_cache.csv"
+        cache_dir = Path("trading_logs/scanner")
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        CACHE_FILE = cache_dir / "sp500_market_cap_cache.csv"
         CACHE_DURATION_DAYS = 7
         
         # Check Cache
-        if os.path.exists(CACHE_FILE):
+        if CACHE_FILE.exists():
             mtime = datetime.datetime.fromtimestamp(os.path.getmtime(CACHE_FILE))
             if (datetime.datetime.now() - mtime).days < CACHE_DURATION_DAYS:
                 print(f"Loading S&P 500 list from cache ({CACHE_FILE}, age: {(datetime.datetime.now() - mtime).days} days)...")
@@ -351,7 +354,7 @@ class OptionStrategyScanner:
         except Exception as e:
             print(f"Error fetching market caps: {e}")
             # Fallback to cache if scrape fails but cache exists (even if old)
-            if os.path.exists(CACHE_FILE):
+            if CACHE_FILE.exists():
                 print("Scrape failed, falling back to existing cache (potentially expired).")
                 try:
                     df_cache = pd.read_csv(CACHE_FILE)
@@ -1535,6 +1538,9 @@ class OptionStrategyScanner:
         print(f"                         SCAN RESULTS")
         print(f"{'='*70}")
         
+        output_dir = Path("trading_logs/scanner")
+        output_dir.mkdir(parents=True, exist_ok=True)
+        
         # 1. Failed Candidates Table (show first for context)
         if failed_candidates:
             df_failed = pd.DataFrame(failed_candidates)
@@ -1554,8 +1560,8 @@ class OptionStrategyScanner:
             
             # Save failed results to CSV (only for batch mode)
             if not explicit_mode:
-                df_failed.to_csv("synthetic_long_failed.csv", index=False)
-                print(f"\nFailed candidates saved to synthetic_long_failed.csv")
+                df_failed.to_csv(output_dir / "synthetic_long_failed.csv", index=False)
+                print(f"\nFailed candidates saved to {output_dir / 'synthetic_long_failed.csv'}")
         
         # 2. Recommendations (if no successful candidates)
         if not results and failed_candidates:
@@ -1585,8 +1591,8 @@ class OptionStrategyScanner:
             print(df_results[display_cols].to_markdown(index=False))
             
             # Save full results to CSV
-            df_results.to_csv("synthetic_long_candidates.csv", index=False)
-            print(f"\nFull results saved to synthetic_long_candidates.csv")
+            df_results.to_csv(output_dir / "synthetic_long_candidates.csv", index=False)
+            print(f"\nFull results saved to {output_dir / 'synthetic_long_candidates.csv'}")
         else:
             print("\n--- Final Candidates ---")
             print("No candidates found matching all criteria.")
