@@ -360,7 +360,8 @@ def main():
                         "ask": ask,
                         "ref_price": ref_price,
                         "price_type": price_type,
-                    }
+                    },
+                    "canceled_orders": canceled_orders,
                 }
                 print(json.dumps(result, indent=2))
             sys.exit(0)
@@ -396,7 +397,7 @@ def main():
                     "quantity": qty,
                     "limit_price": limit_price,
                     "entry_price": entry_price,
-                    "notional": theoretical_proceeds,
+                    "estimated_proceeds": theoretical_proceeds,
                     "stop_loss_price": stop_loss_price,
                     "stop_loss_pct": stop_loss_pct,
                     "take_profit_price": take_profit_price,
@@ -407,7 +408,8 @@ def main():
                     "ask": ask,
                     "ref_price": ref_price,
                     "price_type": price_type,
-                }
+                },
+                "canceled_orders": canceled_orders,
             }
             print(json.dumps(result, indent=2))
     except Exception as e:

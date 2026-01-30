@@ -36,9 +36,11 @@ class AlpacaClient:
         self.api_key = api_key or os.getenv('ALPACA_API_KEY')
         self.api_secret = api_secret or os.getenv('ALPACA_API_SECRET')
         self.base_url = base_url or os.getenv('ALPACA_BASE_URL', 'https://paper-api.alpaca.markets')
+        self.base_url = self.base_url.rstrip('/')
         
         # Market data uses a different URL
         self.data_url = os.getenv('ALPACA_DATA_URL', 'https://data.alpaca.markets')
+        self.data_url = self.data_url.rstrip('/')
         
         if not self.api_key or not self.api_secret:
             raise ValueError("API key and secret must be provided or set in .env file")
@@ -352,6 +354,48 @@ class AlpacaClient:
         
         return self._make_request('POST', '/orders', json=order_data)
     
+    def place_option_order(self, symbol: str, side: str, quantity: float,
+                          order_type: str = "market", limit_price: Optional[float] = None,
+                          stop_price: Optional[float] = None, time_in_force: str = "day",
+                          extended_hours: bool = False, client_order_id: Optional[str] = None,
+                          order_class: Optional[str] = None,
+                          stop_loss_price: Optional[float] = None,
+                          take_profit_price: Optional[float] = None) -> Dict:
+        """
+        Place a single-leg option order (similar to stock order structure)
+        
+        Args:
+            symbol: Option symbol (OCC format, e.g. 'AAPL230120C00150000')
+            side: 'buy' or 'sell'
+            quantity: Number of contracts
+            order_type: 'market', 'limit', 'stop', 'stop_limit'
+            limit_price: Limit price
+            stop_price: Stop price
+            time_in_force: 'day', 'gtc', etc.
+            extended_hours: Allow extended hours
+            client_order_id: Client order ID
+            order_class: 'simple' (bracket not supported for single options yet)
+            stop_loss_price: Stop loss price (used when order_class='bracket')
+            take_profit_price: Take profit price (optional, used when order_class='bracket')
+            
+        Returns:
+            Order dictionary
+        """
+        return self.place_stock_order(
+            symbol=symbol,
+            side=side,
+            quantity=quantity,
+            order_type=order_type,
+            limit_price=limit_price,
+            stop_price=stop_price,
+            time_in_force=time_in_force,
+            extended_hours=extended_hours,
+            client_order_id=client_order_id,
+            order_class=order_class,
+            stop_loss_price=stop_loss_price,
+            take_profit_price=take_profit_price
+        )
+
     def place_crypto_order(self, symbol: str, side: str, order_type: str = "market",
                           time_in_force: str = "gtc", qty: Optional[float] = None,
                           notional: Optional[float] = None, limit_price: Optional[float] = None,
@@ -759,24 +803,18 @@ class AlpacaClient:
         if feed:
             params['feed'] = feed.lower()
         
-        # Check if multiple symbols
-        if ',' in symbol_or_symbols:
-            # Multiple symbols
-            params['symbols'] = symbol_or_symbols.upper()
-            response = self._make_request('GET', '/v1beta1/options/snapshots', use_data_api=True, params=params)
-            
-            # API returns data wrapped in 'snapshots' key as dict
-            if isinstance(response, dict) and 'snapshots' in response:
-                return response['snapshots']
-            return response
-        else:
-            # Single symbol
-            response = self._make_request('GET', f'/v1beta1/options/snapshots/{symbol_or_symbols.upper()}', use_data_api=True, params=params)
-            
-            # API returns data wrapped in 'snapshot' key
-            if isinstance(response, dict) and 'snapshot' in response:
-                return response['snapshot']
-            return response
+        # Always use the bulk endpoint to avoid issues with single symbol path interpretation
+        params['symbols'] = symbol_or_symbols.upper()
+        response = self._make_request('GET', '/v1beta1/options/snapshots', use_data_api=True, params=params)
+        
+        # API returns data wrapped in 'snapshots' key as dict
+        if isinstance(response, dict) and 'snapshots' in response:
+            snapshots = response['snapshots']
+            # If user requested a single symbol without commas, return just that snapshot for backward compatibility
+            if ',' not in symbol_or_symbols and symbol_or_symbols.upper() in snapshots:
+                return snapshots[symbol_or_symbols.upper()]
+            return snapshots
+        return response
     
     def get_option_bars(self, symbol_or_symbols: Union[str, List[str]], timeframe: str = "1Min",
                        start: Optional[str] = None, end: Optional[str] = None,

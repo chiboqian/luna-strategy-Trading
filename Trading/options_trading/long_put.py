@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Creates a Short Call position for a given symbol.
+Creates a Long Put position for a given symbol.
 
-A Short Call is a bearish/neutral strategy that profits from time decay or a drop in the underlying stock price.
-Risk is theoretically unlimited (if naked). Profit is limited to the premium received.
+A Long Put is a bearish strategy that profits from a decline in the underlying stock price.
+Risk is limited to the premium paid. Profit potential is substantial (up to strike price).
 
 Structure (1 Leg):
-1. Sell ATM (or OTM) Call
+1. Buy ATM (or slightly OTM/ITM) Put
 
 Usage:
-    python util/short_call.py SPY --days 30 --quantity 1
-    python util/short_call.py AAPL --amount 2000 --dry-run
+    python util/long_put.py SPY --days 30 --quantity 1
+    python util/long_put.py AAPL --amount 2000 --dry-run
 """
 
 import sys
@@ -79,21 +79,23 @@ def main():
         except Exception:
             pass
 
-    defaults = config.get("options", {}).get("short_call", {})
+    defaults = config.get("options", {}).get("long_put", {})
     default_days = defaults.get("min_days_to_expiration", 30)
     default_window = defaults.get("search_window_days", 14)
     default_amount = defaults.get("default_amount", 0.0)
     default_moneyness = defaults.get("moneyness", 1.0) # 1.0 = ATM
 
-    parser = argparse.ArgumentParser(description="Execute Short Call Strategy")
+    parser = argparse.ArgumentParser(description="Execute Long Put Strategy")
     parser.add_argument("symbol", help="Underlying stock symbol (e.g. SPY)")
     parser.add_argument("--quantity", type=int, default=None, help="Number of contracts")
     parser.add_argument("--days", type=int, default=default_days, help=f"Days to expiration (min), default {default_days}")
     parser.add_argument("--window", type=int, default=default_window, help=f"Search window (days), default {default_window}")
-    parser.add_argument("--amount", type=float, default=None, help=f"Notional dollar amount (max risk/margin)")
-    parser.add_argument("--moneyness", type=float, default=default_moneyness, help=f"Moneyness (1.0 = ATM, >1.0 = OTM, <1.0 = ITM for calls)")
+    parser.add_argument("--amount", type=float, default=None, help=f"Notional dollar amount (max risk)")
+    parser.add_argument("--moneyness", type=float, default=default_moneyness, help=f"Moneyness (1.0 = ATM, <1.0 = OTM for puts)")
     parser.add_argument("--limit-order", action="store_true", help="Use limit order at mid-price")
     parser.add_argument("--dry-run", action="store_true", help="Do not execute, just show plan")
+    parser.add_argument("--stop-loss-pct", type=float, help="Stop loss as a percentage of the premium paid")
+    parser.add_argument("--take-profit-pct", type=float, help="Take profit as a percentage of the premium paid")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     parser.add_argument("--historical", type=str, help="Path to historical data file (mock mode)")
     parser.add_argument("--underlying", type=str, help="Path to underlying data file (mock mode)")
@@ -126,6 +128,25 @@ def main():
 
     symbol = args.symbol.upper()
     
+    # Check for existing positions
+    if not args.historical:
+        try:
+            positions = client.get_all_positions()
+            for p in positions:
+                if p['symbol'] == symbol:
+                    msg = f"Existing stock position in {symbol}. Skipping."
+                    if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                    else: print(msg)
+                    return
+                if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
+                    if p['symbol'][:-15] == symbol:
+                        msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
+                        if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                        else: print(msg)
+                        return
+        except Exception as e:
+            if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
+
     # 1. Get Spot Price
     current_price = 0.0
     try:
@@ -168,7 +189,7 @@ def main():
             expiration_date_lte=end_date,
             strike_price_gte=min_strike,
             strike_price_lte=max_strike,
-            type='call',
+            type='put',
             limit=10000,
             status='active'
         )
@@ -196,15 +217,15 @@ def main():
         return
     
     exp_contracts = expirations[selected_exp]
-    call_contract = get_closest_contract(exp_contracts, target_strike, 'call')
+    put_contract = get_closest_contract(exp_contracts, target_strike, 'put')
     
-    if not call_contract:
-        err = {"error": "Could not find suitable call contract"}
+    if not put_contract:
+        err = {"error": "Could not find suitable put contract"}
         if args.json: print(json.dumps(err))
         else: print(f"Error: {err['error']}", file=sys.stderr)
         return
 
-    sym = call_contract['symbol']
+    sym = put_contract['symbol']
     snapshots = client.get_option_snapshot(sym)
     if 'latestQuote' in snapshots: snapshots = {sym: snapshots}
     
@@ -215,35 +236,43 @@ def main():
     last = float(snap.get('latestTrade', {}).get('p') or 0)
     
     mid = (ask + bid) / 2 if (ask > 0 and bid > 0) else last
-    price = mid if args.limit_order else (bid if bid > 0 else last)
-    total_credit = price
+    price = mid if args.limit_order else (ask if ask > 0 else last)
+    total_cost = price
     
     legs = [{
         "symbol": sym,
-        "side": "sell",
-        "position_intent": "sell_to_open",
+        "side": "buy",
+        "position_intent": "buy_to_open",
         "ratio_qty": 1,
         "estimated_price": price
     }]
 
     if args.amount and args.amount > 0:
-        # For short call, margin requirement is usually 20% of underlying + premium - OTM amount
-        # Simplified: 20% of underlying
-        margin_req = current_price * 0.20 * 100
-        if margin_req > 0:
-            args.quantity = max(1, int(args.amount // margin_req))
+        cost_per_contract = total_cost * 100
+        if cost_per_contract > 0:
+            args.quantity = max(1, int(args.amount // cost_per_contract))
+
+    # Calculate take profit and stop loss values if percentage is given
+    take_profit_val = None
+    stop_loss_val = None
+    if args.take_profit_pct is not None:
+        # Long Put: Take profit is higher than entry (option value increases)
+        take_profit_val = price * (1 + args.take_profit_pct)
+    if args.stop_loss_pct is not None:
+        # Long Put: Stop loss is lower than entry
+        stop_loss_val = price * (1 - args.stop_loss_pct)
 
     if not args.json:
-        print(f"\n--- Short Call Analysis ---")
+        print(f"\n--- Long Put Analysis ---")
         print(f"Expiration: {selected_exp}")
-        print(f"Strike:     ${float(call_contract['strike_price']):.2f}")
+        print(f"Strike:     ${float(put_contract['strike_price']):.2f}")
         print(f"Premium:    ${price:.2f}")
-        print(f"Total Credit: ${total_credit * 100:.2f} per contract")
+        print(f"Total Cost: ${total_cost * 100:.2f} per contract")
         print(f"Quantity:   {args.quantity}")
 
     if args.dry_run:
         if args.json:
-            print(json.dumps({"status": "dry_run", "legs": legs, "credit": total_credit}, indent=2))
+            print(json.dumps({"status": "dry_run", "legs": legs, "cost": total_cost}, indent=2))
         else:
             print("\nDry Run Complete.")
         return
@@ -252,27 +281,48 @@ def main():
         print(f"\nSubmitting order...")
         
     try:
-        entry_cash_flow = total_credit
+        entry_cash_flow = -total_cost
         kwargs = {'legs': legs, 'quantity': args.quantity, 'time_in_force': 'day', 'order_class': 'simple'}
         
         if args.limit_order:
              kwargs['limit_price'] = round(price, 2)
-             kwargs['type'] = 'limit'
-        else:
-             kwargs['type'] = 'market'
 
         if isinstance(client, MockOptionClient):
             kwargs['entry_cash_flow'] = entry_cash_flow
             kwargs['underlying_price'] = current_price
-            response = client.place_option_market_order(**kwargs)
+            if args.stop_loss_pct:
+                kwargs['stop_loss_pct'] = args.stop_loss_pct
+            if args.take_profit_pct:
+                kwargs['take_profit_pct'] = args.take_profit_pct
+            
+            response = client.place_option_limit_order(**kwargs) if args.limit_order else client.place_option_market_order(**kwargs)
         else:
-            response = client.place_option_market_order(**kwargs)
+            # For live trading, place entry order.
+            if args.stop_loss_pct is not None or args.take_profit_pct is not None:
+                print("Warning: Stop Loss and Take Profit (Bracket Orders) are not supported for options via API.", file=sys.stderr)
+                print("         These parameters will be ignored for the entry order.", file=sys.stderr)
+                
+                tp_arg = f"--tp {args.take_profit_pct}" if args.take_profit_pct is not None else ""
+                sl_arg = f"--sl {args.stop_loss_pct}" if args.stop_loss_pct is not None else ""
+                print(f"         To monitor, run: python options_trading/manage_options.py --symbol {symbol} {tp_arg} {sl_arg}", file=sys.stderr)
+            
+            response = client.place_option_order(
+                symbol=legs[0]['symbol'],
+                side='buy',
+                quantity=args.quantity,
+                order_type='limit' if args.limit_order else 'market',
+                limit_price=round(price, 2) if args.limit_order else None,
+                time_in_force='day',
+                order_class=None,
+                stop_loss_price=None,
+                take_profit_price=None
+            )
             
         if args.json:
             print(json.dumps({"status": "executed", "order": response}, indent=2))
         else:
             print(f"Order Submitted: {response.get('id')}")
-            print(f"Sold Contract Price: ${price:.2f}")
+            print(f"Purchase Price: ${price:.2f}")
             
     except Exception as e:
         err = {"error": str(e)}

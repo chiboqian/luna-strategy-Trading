@@ -28,8 +28,6 @@ STRATEGY_DEFAULTS = {
     "iron_condor": {"tp": 0.5, "sl": 1.0},
     "straddle": {"tp": 0.25, "sl": 0.15},
     "long_call": {"tp": 0.5, "sl": 0.3},
-    "short_call": {"tp": 0.5, "sl": 1.0},
-    "short_call": {"tp": 0.5, "sl": 1.0},
     "long_stock": {"tp": 0.1, "sl": 0.05},
     "synthetic_short": {"tp": 0.5, "sl": 0.4},
     "vertical_spread": {"tp": 0.5, "sl": 0.5}
@@ -214,8 +212,8 @@ def main():
         if args.underlying:
             cmd_open.extend(["--underlying", args.underlying])
         
-        # Default to limit order (mid-price) for long_call, short_call, long_stock and vertical_spread
-        if args.strategy in ["long_call", "short_call", "long_stock", "vertical_spread"]:
+        # Default to limit order (mid-price) for long_call, long_stock and vertical_spread
+        if args.strategy in ["long_call", "long_stock", "vertical_spread"]:
             cmd_open.append("--limit-order")
         
         # Add strategy specific args

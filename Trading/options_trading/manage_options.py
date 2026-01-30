@@ -516,26 +516,8 @@ def main():
             reason = f"Stop Loss: {metrics['pl_pct']:.1%} <= -{args.sl:.1%}"
             
         if action == "CLOSE":
-            # Construct Closing Order
-            close_legs = []
-            for leg in legs:
-                qty = float(leg['qty'])
-                # To close:
-                # If Long (qty > 0) -> Sell
-                # If Short (qty < 0) -> Buy
-                side = 'sell' if qty > 0 else 'buy'
-                close_legs.append({
-                    "symbol": leg['symbol'],
-                    "side": side,
-                    "position_intent": "sell_to_close" if side == 'sell' else "buy_to_close",
-                    "ratio_qty": 1 # Assuming we close the whole structure 1:1
-                })
-                
-            # Determine quantity (absolute value of leg qty)
-            # Assuming balanced spread (all legs have same abs qty)
-            # If not, this simple logic might fail for ratio spreads.
-            # We use the qty of the first leg.
-            close_qty = abs(int(float(legs[0]['qty'])))
+            # Identify symbols to close
+            symbols_to_close = [leg['symbol'] for leg in legs]
             
             actions.append({
                 "root": root,
@@ -543,8 +525,7 @@ def main():
                 "dte": dte,
                 "metrics": metrics,
                 "reason": reason,
-                "legs": close_legs,
-                "qty": close_qty
+                "symbols": symbols_to_close
             })
 
     # Execute Actions
@@ -559,27 +540,24 @@ def main():
                 print(f"  Reason: {act['reason']}")
                 print(f"  Metrics: Initial ${act['metrics']['net_initial']:.2f}, Current P/L ${act['metrics']['unrealized_pl']:.2f}")
         else:
-            try:
-                # Use multi-leg order if > 1 leg, else simple close
-                if len(act['legs']) > 1:
-                    client.place_option_market_order(
-                        legs=act['legs'],
-                        quantity=act['qty'],
-                        time_in_force='day',
-                        order_class='mleg'
-                    )
-                else:
-                    # Single leg close
-                    client.close_position(act['legs'][0]['symbol'])
-                    
+            # Close each position individually to avoid complex order validation errors
+            errors = []
+            for symbol in act['symbols']:
+                try:
+                    client.close_position(symbol)
+                    if not args.json:
+                        print(f"Submitted CLOSE for {symbol}")
+                except Exception as e:
+                    errors.append(f"{symbol}: {str(e)}")
+                    if not args.json:
+                        print(f"Error closing {symbol}: {e}", file=sys.stderr)
+            
+            if errors:
+                results.append({"status": "error", "description": desc, "error": "; ".join(errors)})
+            else:
                 results.append({"status": "submitted", "description": desc, "reason": act['reason']})
                 if not args.json:
-                    print(f"Submitted CLOSE for {desc}")
                     print(f"  Reason: {act['reason']}")
-            except Exception as e:
-                results.append({"status": "error", "description": desc, "error": str(e)})
-                if not args.json:
-                    print(f"Error closing {desc}: {e}", file=sys.stderr)
 
     if args.json:
         print(json.dumps(results, indent=2))

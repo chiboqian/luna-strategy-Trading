@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+import os
+import sys
+import yaml
+import asyncio
+import logging
+import subprocess
+import time
+import math
+import json
+from collections import deque
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("StreamFramework")
+
+# Check for alpaca-py
+try:
+    from alpaca.data.live.stock import StockDataStream
+    from alpaca.data.live.option import OptionDataStream
+    from alpaca.data.models import Quote, Bar
+except ImportError:
+    logger.error("alpaca-py is required. Please install it: pip install alpaca-py")
+    sys.exit(1)
+
+class StreamFramework:
+    def __init__(self, config_path: str):
+        load_dotenv()
+        self.config = self._load_config(config_path)
+        self.api_key = os.getenv('ALPACA_API_KEY')
+        self.secret_key = os.getenv('ALPACA_API_SECRET')
+        
+        if not self.api_key or not self.secret_key:
+            raise ValueError("ALPACA_API_KEY and ALPACA_API_SECRET must be set in environment variables.")
+
+        self.stock_stream = None
+        self.option_stream = None
+        
+        # Rules storage: symbol -> list of rules
+        self.stock_rules = {}
+        self.option_rules = {}
+        
+        # Bar history: symbol -> deque of close prices
+        self.bar_history = {}
+        self.history_file = Path("bar_history.json")
+        # Cooldown tracking: rule_name -> last_triggered_timestamp
+        self.last_triggered = {}
+        # Track rules that are one-off and have been triggered
+        self.triggered_rules = set()
+        
+        self._load_history()
+        self._setup_streams()
+
+    def _load_history(self):
+        if self.history_file.exists():
+            try:
+                with open(self.history_file, 'r') as f:
+                    data = json.load(f)
+                    for symbol, prices in data.items():
+                        # Validate data format (handle migration from list of floats to list of [close, volume])
+                        if prices and isinstance(prices[0], (int, float)):
+                            # Old format: convert to (price, 0) or discard. Discarding to ensure clean state.
+                            logger.warning(f"Old history format detected for {symbol}. Resetting history.")
+                            self.bar_history[symbol] = deque(maxlen=300)
+                        else:
+                            self.bar_history[symbol] = deque(prices, maxlen=300)
+                logger.info(f"Loaded bar history for {len(self.bar_history)} symbols.")
+            except Exception as e:
+                logger.error(f"Failed to load history: {e}")
+
+    def _save_history(self):
+        try:
+            data = {sym: list(hist) for sym, hist in self.bar_history.items()}
+            with open(self.history_file, 'w') as f:
+                json.dump(data, f)
+            logger.info(f"Saved bar history to {self.history_file}.")
+        except Exception as e:
+            logger.error(f"Failed to save history: {e}")
+
+    def _load_config(self, path: str) -> Dict:
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Config file not found: {path}")
+        with open(path, 'r') as f:
+            return yaml.safe_load(f)
+
+    def _setup_streams(self):
+        rules = self.config.get('rules', [])
+        stock_symbols = set()
+        stock_bar_symbols = set()
+        option_symbols = set()
+
+        for rule in rules:
+            # Default to stock if not specified
+            asset_class = rule.get('asset_class', 'stock').lower()
+            trigger = rule.get('trigger', 'quote') # 'quote' or 'bar'
+            symbol = rule.get('symbol')
+            
+            if not symbol:
+                continue
+
+            if asset_class == 'stock':
+                if trigger == 'bar':
+                    stock_bar_symbols.add(symbol)
+                else:
+                    stock_symbols.add(symbol)
+                
+                if symbol not in self.stock_rules:
+                    self.stock_rules[symbol] = []
+                self.stock_rules[symbol].append(rule)
+            elif asset_class == 'option':
+                option_symbols.add(symbol)
+                if symbol not in self.option_rules:
+                    self.option_rules[symbol] = []
+                self.option_rules[symbol].append(rule)
+
+        # Initialize Stock Stream if needed
+        if stock_symbols:
+            self.stock_stream = StockDataStream(self.api_key, self.secret_key)
+            self.stock_stream.subscribe_quotes(self._handle_stock_quote, *stock_symbols)
+            logger.info(f"Subscribed to STOCK quotes: {stock_symbols}")
+            
+        if stock_bar_symbols:
+            if not self.stock_stream:
+                self.stock_stream = StockDataStream(self.api_key, self.secret_key)
+            self.stock_stream.subscribe_bars(self._handle_stock_bar, *stock_bar_symbols)
+            logger.info(f"Subscribed to STOCK bars: {stock_bar_symbols}")
+
+        # Initialize Option Stream if needed
+        if option_symbols:
+            self.option_stream = OptionDataStream(self.api_key, self.secret_key)
+            self.option_stream.subscribe_quotes(self._handle_option_quote, *option_symbols)
+            logger.info(f"Subscribed to OPTION quotes: {option_symbols}")
+
+    async def _handle_stock_quote(self, data: Quote):
+        await self._evaluate_rules(data, self.stock_rules.get(data.symbol, []), data_type='quote')
+
+    async def _handle_stock_bar(self, data: Bar):
+        symbol = data.symbol
+        if symbol not in self.bar_history:
+            self.bar_history[symbol] = deque(maxlen=300) # Keep last 300 bars (enough for SMA 200)
+        
+        self.bar_history[symbol].append((data.close, data.volume))
+        await self._evaluate_rules(data, self.stock_rules.get(symbol, []), data_type='bar')
+
+    async def _handle_option_quote(self, data: Quote):
+        await self._evaluate_rules(data, self.option_rules.get(data.symbol, []), data_type='quote')
+
+    async def _evaluate_rules(self, data: Any, rules: List[Dict], data_type: str = 'quote'):
+        for rule in rules:
+            # Only evaluate rules meant for this data type
+            if rule.get('trigger', 'quote') != data_type:
+                continue
+            
+            # Check if rule is one-off and already triggered
+            rule_name = rule.get('name', 'unnamed_rule')
+            if rule.get('one_off', False) and rule_name in self.triggered_rules:
+                continue
+            
+            # Support multiple conditions (AND logic)
+            conditions = rule.get('conditions')
+            if conditions is None:
+                # Fallback to single condition
+                single_cond = rule.get('condition')
+                conditions = [single_cond] if single_cond else []
+            
+            if not conditions:
+                continue
+
+            if all(self._check_condition(data, cond, data_type) for cond in conditions):
+                await self._trigger_action(rule, data)
+
+    def _get_field_value(self, data: Any, field: str, data_type: str) -> Optional[float]:
+        if data_type == 'bar':
+            # Handle calculated fields for bars
+            if field.startswith('sma_'):
+                # Format: sma_20
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_sma(data.symbol, period)
+                except (IndexError, ValueError):
+                    logger.error(f"Invalid SMA field format: {field}")
+                    return None
+            elif field.startswith('vwap_'):
+                # Format: vwap_20
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_vwap(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
+            elif field.startswith('stddev_'):
+                # Format: stddev_20
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_stddev(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
+            elif field.startswith('z_score_vwap_'):
+                # Format: z_score_vwap_20 (Z-Score of Price vs VWAP)
+                try:
+                    period = int(field.split('_')[3])
+                    return self._calculate_z_score_vwap(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
+            elif field.startswith('z_score_sma_'):
+                # Format: z_score_sma_20 (Z-Score of Price vs SMA)
+                try:
+                    period = int(field.split('_')[3])
+                    return self._calculate_z_score_sma(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
+            elif field.startswith('rsi_'):
+                # Format: rsi_14
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_rsi(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
+            else:
+                return getattr(data, field, None)
+        else:
+            # Quote data
+            return getattr(data, field, None)
+
+    def _check_condition(self, data: Any, condition: Dict, data_type: str) -> bool:
+        field = condition.get('field')
+        operator = condition.get('operator')
+        raw_value = condition.get('value')
+
+        current_value = self._get_field_value(data, field, data_type)
+        
+        # Resolve target value (can be float or another field)
+        target_value = None
+        try:
+            target_value = float(raw_value)
+        except (ValueError, TypeError):
+            if isinstance(raw_value, str):
+                target_value = self._get_field_value(data, raw_value, data_type)
+        
+        if current_value is None or target_value is None:
+            return False
+
+        if operator == '>':
+            return current_value > target_value
+        elif operator == '>=':
+            return current_value >= target_value
+        elif operator == '<':
+            return current_value < target_value
+        elif operator == '<=':
+            return current_value <= target_value
+        elif operator == '==':
+            return current_value == target_value
+        elif operator == 'abs<':
+            return abs(current_value) < target_value
+        elif operator == 'abs>':
+            return abs(current_value) > target_value
+        
+        return False
+
+    def _calculate_sma(self, symbol: str, period: int) -> Optional[float]:
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        # History items are [close, volume]
+        closes = [x[0] for x in list(history)[-period:]]
+        return sum(closes) / period
+
+    def _calculate_vwap(self, symbol: str, period: int) -> Optional[float]:
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        subset = list(history)[-period:]
+        total_pv = sum(x[0] * x[1] for x in subset)
+        total_v = sum(x[1] for x in subset)
+        return total_pv / total_v if total_v > 0 else None
+
+    def _calculate_stddev(self, symbol: str, period: int) -> Optional[float]:
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        closes = [x[0] for x in list(history)[-period:]]
+        mean = sum(closes) / period
+        variance = sum((x - mean) ** 2 for x in closes) / period
+        return math.sqrt(variance)
+
+    def _calculate_z_score_vwap(self, symbol: str, period: int) -> Optional[float]:
+        # Z = (Price - VWAP) / StdDev
+        # Using the most recent close price
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        
+        current_price = history[-1][0]
+        vwap = self._calculate_vwap(symbol, period)
+        stddev = self._calculate_stddev(symbol, period)
+        
+        if vwap is None or stddev is None or stddev == 0:
+            return None
+            
+        return (current_price - vwap) / stddev
+
+    def _calculate_z_score_sma(self, symbol: str, period: int) -> Optional[float]:
+        # Z = (Price - SMA) / StdDev
+        # Using the most recent close price
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        
+        current_price = history[-1][0]
+        sma = self._calculate_sma(symbol, period)
+        stddev = self._calculate_stddev(symbol, period)
+        
+        if sma is None or stddev is None or stddev == 0:
+            return None
+            
+        return (current_price - sma) / stddev
+
+    def _calculate_rsi(self, symbol: str, period: int) -> Optional[float]:
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period + 1:
+            return None
+        
+        # Extract closing prices
+        closes = [x[0] for x in history]
+        
+        # Calculate deltas
+        deltas = [closes[i+1] - closes[i] for i in range(len(closes)-1)]
+        
+        if len(deltas) < period:
+            return None
+
+        # First 'period' deltas for initial average
+        seed_deltas = deltas[:period]
+        avg_gain = sum(d for d in seed_deltas if d > 0) / period
+        avg_loss = sum(abs(d) for d in seed_deltas if d < 0) / period
+        
+        # Smooth for the rest of the data to get current RSI
+        for d in deltas[period:]:
+            gain = d if d > 0 else 0.0
+            loss = abs(d) if d < 0 else 0.0
+            
+            avg_gain = (avg_gain * (period - 1) + gain) / period
+            avg_loss = (avg_loss * (period - 1) + loss) / period
+            
+        if avg_loss == 0:
+            return 100.0
+            
+        rs = avg_gain / avg_loss
+        return 100.0 - (100.0 / (1.0 + rs))
+
+    async def _trigger_action(self, rule: Dict, data: Any):
+        rule_name = rule.get('name', 'unnamed_rule')
+        cooldown = rule.get('cooldown', 0)
+        
+        if rule.get('one_off', False) and rule_name in self.triggered_rules:
+            return
+            
+        now = time.time()
+
+        # Check cooldown
+        if rule_name in self.last_triggered:
+            if now - self.last_triggered[rule_name] < cooldown:
+                return
+
+        # Prepare value string safely
+        val_str = ""
+        if 'condition' in rule and isinstance(rule['condition'], dict):
+             field = rule['condition'].get('field')
+             if field:
+                 val_str = f" (Value: {getattr(data, field, 'N/A')})"
+
+        print(f"Trigger Name: {rule_name}")
+        logger.info(f"⚡ RULE TRIGGERED: {rule_name} for {data.symbol}{val_str}")
+        self.last_triggered[rule_name] = now
+        
+        if rule.get('one_off', False):
+            self.triggered_rules.add(rule_name)
+            logger.info(f"   Rule '{rule_name}' is set to one-off. Removing from active triggers.")
+
+        action = rule.get('action', {})
+        
+        # Support both 'command' (single string) and 'commands' (list of strings)
+        command_templates = []
+        if 'commands' in action and isinstance(action['commands'], list):
+            command_templates.extend(action['commands'])
+        elif 'command' in action:
+            command_templates.append(action['command'])
+        
+        if command_templates:
+            # Prepare context for variable substitution in command
+            context = {
+                'symbol': data.symbol,
+                'ask_price': getattr(data, 'ask_price', 0),
+                'bid_price': getattr(data, 'bid_price', 0),
+                'close': getattr(data, 'close', 0),
+                'timestamp': str(data.timestamp),
+                'python': sys.executable  # Allow using the current python interpreter
+            }
+            
+            for tmpl in command_templates:
+                try:
+                    # Substitute variables like {symbol} or {ask_price}
+                    command = tmpl.format(**context)
+                    print(f"Command: {command}")
+                    logger.info(f"   🚀 Executing: {command}")
+                    
+                    # Execute non-blocking
+                    subprocess.Popen(command, shell=True)
+                    
+                except Exception as e:
+                    logger.error(f"   ❌ Failed to execute action for {rule_name}: {e}")
+
+    async def run(self):
+        tasks = []
+        loop = asyncio.get_running_loop()
+        if self.stock_stream:
+            self.stock_stream._loop = loop
+            tasks.append(self.stock_stream._run_forever())
+        if self.option_stream:
+            self.option_stream._loop = loop
+            tasks.append(self.option_stream._run_forever())
+        
+        if not tasks:
+            logger.warning("No streams configured. Please check your config file.")
+            return
+
+        logger.info("Starting streams... Press Ctrl+C to stop.")
+        try:
+            await asyncio.gather(*tasks)
+        finally:
+            self._save_history()
+            if self.stock_stream:
+                await self.stock_stream.close()
+            if self.option_stream:
+                await self.option_stream.close()
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser(description="Alpaca Streaming Framework")
+    parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to rules config file")
+    args = parser.parse_args()
+
+    # Resolve config path
+    config_path = Path(args.config)
+    if not config_path.exists():
+        # Try finding it relative to project root if run from elsewhere
+        project_root = Path(__file__).resolve().parent.parent.parent
+        alt_path = project_root / args.config
+        if alt_path.exists():
+            config_path = alt_path
+        else:
+            # Fallback to absolute path if provided
+            if not config_path.is_absolute():
+                 config_path = Path.cwd() / args.config
+            
+            if not config_path.exists():
+                 print(f"Error: Config file not found at {config_path}")
+                 sys.exit(1)
+
+    framework = StreamFramework(str(config_path))
+    
+    try:
+        asyncio.run(framework.run())
+    except KeyboardInterrupt:
+        logger.info("Stopping streams...")

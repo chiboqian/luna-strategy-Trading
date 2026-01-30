@@ -207,7 +207,17 @@ def main():
 
     # But if we have SL/TP, we need the time series.
     # For simplicity, let's keep the time series if SL/TP is requested, otherwise deduplicate.
-    use_step_logic = args.stop_loss_pct is not None or args.take_profit_pct is not None
+    
+    # Determine SL/TP from args OR order file
+    stop_loss_pct = args.stop_loss_pct
+    if stop_loss_pct is None:
+        stop_loss_pct = order.get('stop_loss_pct')
+        
+    take_profit_pct = args.take_profit_pct
+    if take_profit_pct is None:
+        take_profit_pct = order.get('take_profit_pct')
+        
+    use_step_logic = stop_loss_pct is not None or take_profit_pct is not None
     
     # Combine data sources for step logic if needed?
     # For now, we'll check underlying_df if symbol not found in day_df
@@ -312,14 +322,14 @@ def main():
             pnl_pct = unit_pnl / initial_basis
             
             # Take Profit
-            if args.take_profit_pct and pnl_pct >= args.take_profit_pct:
+            if take_profit_pct is not None and pnl_pct >= take_profit_pct:
                 triggered = True
                 close_reason = f"Take Profit ({pnl_pct:.1%})"
             
             # Stop Loss
             # Stop loss is usually defined as losing X% of the basis.
             # So PnL % <= -X%
-            elif args.stop_loss_pct and pnl_pct <= -args.stop_loss_pct:
+            elif stop_loss_pct is not None and pnl_pct <= -stop_loss_pct:
                 triggered = True
                 close_reason = f"Stop Loss ({pnl_pct:.1%})"
             

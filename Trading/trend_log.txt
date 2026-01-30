@@ -1,0 +1,4 @@
+SPY Trend Up: Close 690.78 > SMA_5
+SPY Trend Up: Close 690.96 > SMA_5
+SPY Trend Up: Close 690.65 > SMA_5
+SPY Trend Up: Close 690.72 > SMA_5

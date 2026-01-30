@@ -1053,6 +1053,25 @@ def main():
 
     symbol = args.symbol.upper()
     
+    # Check for existing positions
+    if not args.historical:
+        try:
+            positions = client.get_all_positions()
+            for p in positions:
+                if p['symbol'] == symbol:
+                    msg = f"Existing stock position in {symbol}. Skipping."
+                    if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                    else: print(msg)
+                    return
+                if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
+                    if p['symbol'][:-15] == symbol:
+                        msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
+                        if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                        else: print(msg)
+                        return
+        except Exception as e:
+            if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
+
     # Get Account Info (for buying power check)
     account_info = {}
     try:
@@ -2048,7 +2067,7 @@ def main():
             # Note: Alpaca may require different API call for limit orders
             # This assumes the client supports limit_price parameter
             # Pass entry_cash_flow for mock orders (Credit = positive cash flow)
-            entry_cash_flow = limit_credit
+            entry_cash_flow = limit_credit # Credit is positive cash flow
             kwargs = {'legs': legs, 'quantity': args.quantity, 'limit_price': limit_credit, 'time_in_force': 'day', 'order_class': 'mleg'}
             if isinstance(client, MockOptionClient):
                 kwargs['entry_cash_flow'] = entry_cash_flow
@@ -2056,7 +2075,7 @@ def main():
 
             response = client.place_option_limit_order(**kwargs)
         else:
-            # Pass entry_cash_flow for mock orders (Credit = positive cash flow)
+            # Pass entry_cash_flow for mock orders (Credit = positive cash flow for market order)
             entry_cash_flow = metrics['net_credit']
             kwargs = {'legs': legs, 'quantity': args.quantity, 'time_in_force': 'day', 'order_class': 'mleg'}
             if isinstance(client, MockOptionClient):

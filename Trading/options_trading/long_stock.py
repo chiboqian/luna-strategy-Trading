@@ -95,6 +95,25 @@ def main():
 
     symbol = args.symbol.upper()
     
+    # Check for existing positions
+    if not args.historical:
+        try:
+            positions = client.get_all_positions()
+            for p in positions:
+                if p['symbol'] == symbol:
+                    msg = f"Existing stock position in {symbol}. Skipping."
+                    if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                    else: print(msg)
+                    return
+                if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
+                    if p['symbol'][:-15] == symbol:
+                        msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
+                        if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                        else: print(msg)
+                        return
+        except Exception as e:
+            if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
+
     # 1. Get Spot Price
     current_price = 0.0
     bid = 0.0

@@ -94,6 +94,8 @@ def main():
     parser.add_argument("--moneyness", type=float, default=default_moneyness, help=f"Moneyness (1.0 = ATM, >1.0 = OTM, <1.0 = ITM for calls)")
     parser.add_argument("--limit-order", action="store_true", help="Use limit order at mid-price")
     parser.add_argument("--dry-run", action="store_true", help="Do not execute, just show plan")
+    parser.add_argument("--stop-loss-pct", type=float, help="Stop loss as a percentage of the premium paid")
+    parser.add_argument("--take-profit-pct", type=float, help="Take profit as a percentage of the premium paid")
     parser.add_argument("--json", action="store_true", help="Output JSON")
     parser.add_argument("--historical", type=str, help="Path to historical data file (mock mode)")
     parser.add_argument("--underlying", type=str, help="Path to underlying data file (mock mode)")
@@ -126,6 +128,25 @@ def main():
 
     symbol = args.symbol.upper()
     
+    # Check for existing positions
+    if not args.historical:
+        try:
+            positions = client.get_all_positions()
+            for p in positions:
+                if p['symbol'] == symbol:
+                    msg = f"Existing stock position in {symbol}. Skipping."
+                    if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                    else: print(msg)
+                    return
+                if p.get('asset_class') == 'us_option' and len(p['symbol']) >= 15:
+                    if p['symbol'][:-15] == symbol:
+                        msg = f"Existing option position in {symbol} ({p['symbol']}). Skipping."
+                        if args.json: print(json.dumps({"status": "skipped", "reason": msg}))
+                        else: print(msg)
+                        return
+        except Exception as e:
+            if not args.json: print(f"Warning: Check for existing positions failed: {e}", file=sys.stderr)
+
     # 1. Get Spot Price
     current_price = 0.0
     try:
@@ -231,6 +252,16 @@ def main():
         if cost_per_contract > 0:
             args.quantity = max(1, int(args.amount // cost_per_contract))
 
+    # Calculate take profit and stop loss values if percentage is given
+    take_profit_val = None
+    stop_loss_val = None
+    if args.take_profit_pct is not None:
+        # Long Call: Take profit is higher than entry
+        take_profit_val = price * (1 + args.take_profit_pct)
+    if args.stop_loss_pct is not None:
+        # Long Call: Stop loss is lower than entry
+        stop_loss_val = price * (1 - args.stop_loss_pct)
+
     if not args.json:
         print(f"\n--- Long Call Analysis ---")
         print(f"Expiration: {selected_exp}")
@@ -255,16 +286,44 @@ def main():
         
         if args.limit_order:
              kwargs['limit_price'] = round(price, 2)
-             kwargs['type'] = 'limit'
+             # kwargs['type'] = 'limit' # Removed: place_option_limit_order sets this internally, not needed here
         else:
-             kwargs['type'] = 'market'
+             # kwargs['type'] = 'market' # Removed: place_option_market_order sets this internally, not needed here
+             # For market orders, no 'type' kwarg is needed for place_option_market_order
+             pass
 
         if isinstance(client, MockOptionClient):
             kwargs['entry_cash_flow'] = entry_cash_flow
             kwargs['underlying_price'] = current_price
-            response = client.place_option_market_order(**kwargs)
+            # Pass SL/TP for backtesting/management scripts
+            if args.stop_loss_pct:
+                kwargs['stop_loss_pct'] = args.stop_loss_pct
+            if args.take_profit_pct:
+                kwargs['take_profit_pct'] = args.take_profit_pct
+            
+            response = client.place_option_limit_order(**kwargs) if args.limit_order else client.place_option_market_order(**kwargs)
         else:
-            response = client.place_option_market_order(**kwargs)
+            # For live trading, place entry order.
+            # Note: Alpaca Options API does not currently support Bracket orders (SL/TP) via API.
+            if args.stop_loss_pct is not None or args.take_profit_pct is not None:
+                print("Warning: Stop Loss and Take Profit (Bracket Orders) are not supported for options via API.", file=sys.stderr)
+                print("         These parameters will be ignored for the entry order.", file=sys.stderr)
+                
+                tp_arg = f"--tp {args.take_profit_pct}" if args.take_profit_pct is not None else ""
+                sl_arg = f"--sl {args.stop_loss_pct}" if args.stop_loss_pct is not None else ""
+                print(f"         To monitor, run: python options_trading/manage_options.py --symbol {symbol} {tp_arg} {sl_arg}", file=sys.stderr)
+            
+            response = client.place_option_order(
+                symbol=legs[0]['symbol'],
+                side='buy',
+                quantity=args.quantity,
+                order_type='limit' if args.limit_order else 'market',
+                limit_price=round(price, 2) if args.limit_order else None,
+                time_in_force='day',
+                order_class=None,
+                stop_loss_price=None,
+                take_profit_price=None
+            )
             
         if args.json:
             print(json.dumps({"status": "executed", "order": response}, indent=2))

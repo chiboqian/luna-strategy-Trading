@@ -465,11 +465,15 @@ class OptionStrategyScanner:
             bars['sma50'] = bars['close'].rolling(window=50).mean()
             bars['sma200'] = bars['close'].rolling(window=200).mean()
             
-            # Calculate RSI
+            # Calculate RSI (Wilder's Smoothing)
             delta = bars['close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+            
+            avg_gain = gain.ewm(com=13, adjust=False).mean()
+            avg_loss = loss.ewm(com=13, adjust=False).mean()
+            
+            rs = avg_gain / avg_loss
             bars['rsi'] = 100 - (100 / (1 + rs))
             
             current = bars.iloc[-1]
@@ -1010,9 +1014,6 @@ class OptionStrategyScanner:
             elif strategy == "synthetic_short":
                 # Long Put, Short Call
                 entry_cost = target_put_row['ask'] - target_call_row['bid']
-            elif strategy == "short_call":
-                # Short Call
-                entry_cost = -target_call_row['bid'] # Credit
             else:
                 entry_cost = 0.0
             
@@ -1033,8 +1034,6 @@ class OptionStrategyScanner:
                 net_delta = target_call_delta - target_put_delta # Long Call (+), Short Put (-) -> Delta - (-Delta) = Sum
             elif strategy == "synthetic_short":
                 net_delta = target_put_delta - target_call_delta # Long Put (-), Short Call (-) -> -Delta - Delta = -Sum
-            elif strategy == "short_call":
-                net_delta = -target_call_delta
             else:
                 net_delta = 0.0
             
@@ -1047,8 +1046,6 @@ class OptionStrategyScanner:
                 net_theta = call_theta - put_theta  # Short put theta is negated
             elif strategy == "synthetic_short":
                 net_theta = put_theta - call_theta # Long Put (neg), Short Call (pos)
-            elif strategy == "short_call":
-                net_theta = -call_theta # Short Call (pos)
             else:
                 net_theta = 0.0
             
@@ -1058,8 +1055,6 @@ class OptionStrategyScanner:
             
             if strategy in ["synthetic_long", "synthetic_short"]:
                 net_gamma = call_gamma + put_gamma
-            elif strategy == "short_call":
-                net_gamma = -call_gamma
             else:
                 net_gamma = 0.0
             
@@ -1071,8 +1066,6 @@ class OptionStrategyScanner:
                 net_vega = call_vega - put_vega
             elif strategy == "synthetic_short":
                 net_vega = put_vega - call_vega
-            elif strategy == "short_call":
-                net_vega = -call_vega
             else:
                 net_vega = 0.0
             
@@ -1141,7 +1134,7 @@ class OptionStrategyScanner:
             # Theta check: daily decay shouldn't exceed X% of synthetic capital
             theta_pct = abs(net_theta) / (synthetic_capital / 100) if synthetic_capital > 0 else 0
             pass_theta = theta_pct <= max_theta_pct # For long strategies, we pay theta. For short, we earn it.
-            if strategy in ["synthetic_short", "short_call"]:
+            if strategy == "synthetic_short":
                 pass_delta = net_delta <= -min_delta # Expect negative delta
             else:
                 pass_delta = net_delta >= min_delta
@@ -1608,7 +1601,7 @@ class OptionStrategyScanner:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Multi-Strategy Option Scanner")
     parser.add_argument("--strategy", type=str, 
-                        choices=["synthetic_long", "synthetic_short", "short_call"],
+                        choices=["synthetic_long", "synthetic_short"],
                         help="Scan strategy to execute (default: read from config)")
     parser.add_argument("--limit", type=int, help="Limit the number of stocks to scan (overrides config)")
     parser.add_argument("--symbol", type=str, nargs='+', help="Scan specific stock symbol(s) and show detailed metrics")
