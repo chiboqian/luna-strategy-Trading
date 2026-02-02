@@ -39,7 +39,11 @@ logging.basicConfig(
 logger = logging.getLogger("AlpacaCloseCLI")
 
 def main():
-    parser = argparse.ArgumentParser(description="Close positions for specific symbols or all positions.")
+    parser = argparse.ArgumentParser(
+        description="Close positions for specific symbols or all positions.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=__doc__
+    )
     parser.add_argument("symbols", nargs="*", help="List of symbols to close (e.g. AAPL MSFT)")
     parser.add_argument("--all", action="store_true", help="Close ALL open positions")
     parser.add_argument("--qty", type=float, help="Quantity to close (for single symbol only)")
