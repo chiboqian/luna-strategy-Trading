@@ -64,6 +64,7 @@ class StreamFramework:
         self.triggered_rules = set()
         
         self._load_history()
+        self._load_daily_data()
         self._setup_streams()
 
     def _setup_data_recording(self):
@@ -115,6 +116,51 @@ class StreamFramework:
                 logger.info(f"Loaded bar history for {len(self.bar_history)} symbols.")
             except Exception as e:
                 logger.error(f"Failed to load history: {e}")
+
+    def _load_daily_data(self):
+        """Loads existing bar data for the current day from CSV."""
+        if not hasattr(self, 'stock_bar_file') or not self.stock_bar_file.exists():
+            return
+
+        # Avoid duplicating data if history file was already saved today
+        if self.history_file.exists():
+            mtime = self.history_file.stat().st_mtime
+            mdate = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d")
+            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            
+            if mdate == today_str:
+                logger.info("History file updated today. Skipping CSV load to avoid duplicates.")
+                return
+
+        logger.info(f"Checking for existing daily data in {self.stock_bar_file}...")
+        try:
+            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            count = 0
+            
+            with open(self.stock_bar_file, 'r') as f:
+                header = f.readline()
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) < 7: continue
+                    
+                    # timestamp,symbol,open,high,low,close,volume
+                    ts_str, symbol, o, h, l, c, v = parts
+                    
+                    if today_str in ts_str:
+                        if symbol not in self.bar_history:
+                            self.bar_history[symbol] = deque(maxlen=300)
+                        
+                        try:
+                            close_val = float(c)
+                            vol_val = float(v)
+                            self.bar_history[symbol].append((close_val, vol_val))
+                            count += 1
+                        except ValueError:
+                            continue
+            if count > 0:
+                logger.info(f"Loaded {count} bars from today's session.")
+        except Exception as e:
+            logger.error(f"Failed to load daily data: {e}")
 
     def _save_history(self):
         try:
