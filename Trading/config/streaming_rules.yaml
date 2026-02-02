@@ -213,3 +213,51 @@ rules:
       # Extreme overbought with dual confirmation - buy inverse ETF
       command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
     cooldown: 2700
+
+  # ============================================================================
+  # DATA CAPTURE (Passive Monitoring)
+  # ============================================================================
+
+  - name: "Data Capture TQQQ"
+    symbol: "TQQQ"
+    asset_class: "stock"
+    trigger: "bar"
+    condition:
+      field: "close"
+      operator: "<"
+      value: 0.0
+    action:
+      command: "echo 'Data Capture'"
+
+  - name: "Data Capture SQQQ"
+    symbol: "SQQQ"
+    asset_class: "stock"
+    trigger: "bar"
+    condition:
+      field: "close"
+      operator: "<"
+      value: 0.0
+    action:
+      command: "echo 'Data Capture'"
+
+  - name: "Data Capture SPXU"
+    symbol: "SPXU"
+    asset_class: "stock"
+    trigger: "bar"
+    condition:
+      field: "close"
+      operator: "<"
+      value: 0.0
+    action:
+      command: "echo 'Data Capture'"
+
+  - name: "Data Capture UPRO"
+    symbol: "UPRO"
+    asset_class: "stock"
+    trigger: "bar"
+    condition:
+      field: "close"
+      operator: "<"
+      value: 0.0
+    action:
+      command: "echo 'Data Capture'"

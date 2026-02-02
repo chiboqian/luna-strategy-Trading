@@ -38,6 +38,8 @@ class StreamFramework:
         
         setup_logging(log_dir, log_file, self.config, default_dir='trading_logs/streaming', default_file='stream_framework.log')
         
+        self._setup_data_recording()
+        
         self.api_key = os.getenv('ALPACA_API_KEY')
         self.secret_key = os.getenv('ALPACA_API_SECRET')
         
@@ -63,6 +65,39 @@ class StreamFramework:
         
         self._load_history()
         self._setup_streams()
+
+    def _setup_data_recording(self):
+        self.data_dir = Path("trading_logs/market_data")
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.stock_quote_file = self.data_dir / "stock_quotes.csv"
+        self.option_quote_file = self.data_dir / "option_quotes.csv"
+        self.stock_bar_file = self.data_dir / "stock_bars.csv"
+        
+        # Open files in append mode with line buffering
+        self.stock_quote_fh = open(self.stock_quote_file, 'a', buffering=1)
+        self.option_quote_fh = open(self.option_quote_file, 'a', buffering=1)
+        self.stock_bar_fh = open(self.stock_bar_file, 'a', buffering=1)
+        
+        # Write headers if files are empty
+        if self.stock_quote_file.stat().st_size == 0:
+            self.stock_quote_fh.write("timestamp,symbol,bid_price,bid_size,ask_price,ask_size\n")
+        if self.option_quote_file.stat().st_size == 0:
+            self.option_quote_fh.write("timestamp,symbol,bid_price,bid_size,ask_price,ask_size\n")
+        if self.stock_bar_file.stat().st_size == 0:
+            self.stock_bar_fh.write("timestamp,symbol,open,high,low,close,volume\n")
+
+    def _record_quote(self, data: Quote, fh):
+        try:
+            fh.write(f"{data.timestamp},{data.symbol},{data.bid_price},{data.bid_size},{data.ask_price},{data.ask_size}\n")
+        except Exception as e:
+            logger.error(f"Failed to record quote: {e}")
+
+    def _record_bar(self, data: Bar, fh):
+        try:
+            fh.write(f"{data.timestamp},{data.symbol},{data.open},{data.high},{data.low},{data.close},{data.volume}\n")
+        except Exception as e:
+            logger.error(f"Failed to record bar: {e}")
 
     def _load_history(self):
         if self.history_file.exists():
@@ -145,9 +180,11 @@ class StreamFramework:
             logger.info(f"Subscribed to OPTION quotes: {option_symbols}")
 
     async def _handle_stock_quote(self, data: Quote):
+        self._record_quote(data, self.stock_quote_fh)
         await self._evaluate_rules(data, self.stock_rules.get(data.symbol, []), data_type='quote')
 
     async def _handle_stock_bar(self, data: Bar):
+        self._record_bar(data, self.stock_bar_fh)
         symbol = data.symbol
         if symbol not in self.bar_history:
             self.bar_history[symbol] = deque(maxlen=300) # Keep last 300 bars (enough for SMA 200)
@@ -156,6 +193,7 @@ class StreamFramework:
         await self._evaluate_rules(data, self.stock_rules.get(symbol, []), data_type='bar')
 
     async def _handle_option_quote(self, data: Quote):
+        self._record_quote(data, self.option_quote_fh)
         await self._evaluate_rules(data, self.option_rules.get(data.symbol, []), data_type='quote')
 
     async def _evaluate_rules(self, data: Any, rules: List[Dict], data_type: str = 'quote'):
@@ -441,10 +479,17 @@ class StreamFramework:
             await asyncio.gather(*tasks)
         finally:
             self._save_history()
+            self._close_data_recording()
             if self.stock_stream:
                 await self.stock_stream.close()
             if self.option_stream:
                 await self.option_stream.close()
+
+    def _close_data_recording(self):
+        for fh_name in ['stock_quote_fh', 'option_quote_fh', 'stock_bar_fh']:
+            fh = getattr(self, fh_name, None)
+            if fh:
+                fh.close()
 
 if __name__ == "__main__":
     import argparse
