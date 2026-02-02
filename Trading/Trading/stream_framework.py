@@ -57,7 +57,8 @@ class StreamFramework:
         self.bar_history = {}
         history_dir = Path("trading_logs/streaming")
         history_dir.mkdir(parents=True, exist_ok=True)
-        self.history_file = history_dir / "bar_history.json"
+        today_str = datetime.utcnow().strftime("%Y-%m-%d")
+        self.history_file = history_dir / f"bar_history_{today_str}.json"
         # Cooldown tracking: rule_name -> last_triggered_timestamp
         self.last_triggered = {}
         # Track rules that are one-off and have been triggered
@@ -101,9 +102,25 @@ class StreamFramework:
             logger.error(f"Failed to record bar: {e}")
 
     def _load_history(self):
-        if self.history_file.exists():
+        file_to_load = self.history_file
+        
+        if not file_to_load.exists():
+            history_dir = self.history_file.parent
+            # Try to find the most recent dated history file
+            files = list(history_dir.glob("bar_history_*.json"))
+            valid_files = [f for f in files if len(f.name) >= 22] # Basic validation
+            
+            if valid_files:
+                valid_files.sort(reverse=True)
+                file_to_load = valid_files[0]
+                logger.info(f"Today's history not found. Loading most recent: {file_to_load.name}")
+            elif (history_dir / "bar_history.json").exists():
+                file_to_load = history_dir / "bar_history.json"
+                logger.info(f"Loading legacy history file: {file_to_load.name}")
+
+        if file_to_load.exists():
             try:
-                with open(self.history_file, 'r') as f:
+                with open(file_to_load, 'r') as f:
                     data = json.load(f)
                     for symbol, prices in data.items():
                         # Validate data format (handle migration from list of floats to list of [close, volume])
@@ -113,7 +130,7 @@ class StreamFramework:
                             self.bar_history[symbol] = deque(maxlen=300)
                         else:
                             self.bar_history[symbol] = deque(prices, maxlen=300)
-                logger.info(f"Loaded bar history for {len(self.bar_history)} symbols.")
+                logger.info(f"Loaded bar history for {len(self.bar_history)} symbols from {file_to_load.name}.")
             except Exception as e:
                 logger.error(f"Failed to load history: {e}")
 
