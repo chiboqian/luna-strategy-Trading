@@ -351,10 +351,14 @@ class StreamFramework:
             logger.info(f"Subscribed to OPTION quotes: {option_symbols}")
 
     async def _handle_stock_quote(self, data: Quote):
+        if not self._check_schedule():
+            return
         self._record_quote(data, self.stock_quote_fh)
         await self._evaluate_rules(data, self.stock_rules.get(data.symbol, []), data_type='quote')
 
     async def _handle_stock_bar(self, data: Bar):
+        if not self._check_schedule():
+            return
         self._record_bar(data, self.stock_bar_fh)
         symbol = data.symbol
         if symbol not in self.bar_history:
@@ -364,6 +368,8 @@ class StreamFramework:
         await self._evaluate_rules(data, self.stock_rules.get(symbol, []), data_type='bar')
 
     async def _handle_option_quote(self, data: Quote):
+        if not self._check_schedule():
+            return
         self._record_quote(data, self.option_quote_fh)
         await self._evaluate_rules(data, self.option_rules.get(data.symbol, []), data_type='quote')
 
