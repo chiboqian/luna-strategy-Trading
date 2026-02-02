@@ -1,11 +1,13 @@
+# TREND RULES - Following the trend (Uptrend + Downtrend)
 # Optimized for 1-MINUTE BARS
 # RSI 21 = 21 minutes, Z-score 20 = 20 minutes, SMA 50 = 50 min, SMA 200 = 3.3 hours
-# Trend cooldown: 10 min (600s), Mean reversion cooldown: 45 min (2700s)
+# Trend cooldown: 10 min (600s)
 #
-# RULE ARCHITECTURE (no overlaps):
-# - Trend rules: RSI 42-58, z-score -1.5 to 1.5 (neutral zone)
-# - Mean reversion: RSI < 22 OR > 78 WITH z-score confirmation (extremes only)
-# - Removed redundant VWAP-only rules to prevent double-dip signals
+# RULES IN THIS FILE:
+# - SPY Uptrend → Buy UPRO
+# - SPY Downtrend → Buy SPXU
+# - QQQ Uptrend → Buy TQQQ
+# - QQQ Downtrend → Buy SQQQ
 
 rules:
   # ============================================================================
@@ -72,46 +74,6 @@ rules:
     cooldown: 600
 
   # ============================================================================
-  # SPY MEAN REVERSION RULES (Dual Confirmation: RSI + Z-Score)
-  # ============================================================================
-
-  # Mean Reversion: SPY Oversold (RSI < 22 AND z-score < -2.5)
-  # Counter-trend trade: requires BOTH RSI extreme AND statistical extreme
-  - name: "SPY Oversold Mean Reversion"
-    symbol: "SPY"
-    asset_class: "stock"
-    trigger: "bar"
-    conditions:
-      - field: "rsi_21"
-        operator: "<"
-        value: 22.0
-      - field: "z_score_vwap_20"
-        operator: "<"
-        value: -2.5
-    action:
-      # Extreme oversold with dual confirmation - buy the dip
-      command: "python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
-    cooldown: 2700
-
-  # Mean Reversion: SPY Overbought (RSI > 78 AND z-score > 2.5)
-  # Counter-trend trade: requires BOTH RSI extreme AND statistical extreme
-  - name: "SPY Overbought Mean Reversion"
-    symbol: "SPY"
-    asset_class: "stock"
-    trigger: "bar"
-    conditions:
-      - field: "rsi_21"
-        operator: ">"
-        value: 78.0
-      - field: "z_score_vwap_20"
-        operator: ">"
-        value: 2.5
-    action:
-      # Extreme overbought with dual confirmation - buy inverse ETF
-      command: "python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
-    cooldown: 2700
-
-  # ============================================================================
   # QQQ TREND RULES
   # ============================================================================
 
@@ -173,43 +135,3 @@ rules:
       # Buy SQQQ (3x inverse QQQ) instead of shorting TQQQ
       command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
     cooldown: 600
-
-  # ============================================================================
-  # QQQ MEAN REVERSION RULES (Dual Confirmation: RSI + Z-Score)
-  # ============================================================================
-
-  # Mean Reversion: QQQ Oversold (RSI < 22 AND z-score < -2.5)
-  # Counter-trend trade: requires BOTH RSI extreme AND statistical extreme
-  - name: "QQQ Oversold Mean Reversion"
-    symbol: "QQQ"
-    asset_class: "stock"
-    trigger: "bar"
-    conditions:
-      - field: "rsi_21"
-        operator: "<"
-        value: 22.0
-      - field: "z_score_vwap_20"
-        operator: "<"
-        value: -2.5
-    action:
-      # Extreme oversold with dual confirmation - buy the dip
-      command: "python ./Trading/alpaca_buy_cli.py tqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
-    cooldown: 2700
-
-  # Mean Reversion: QQQ Overbought (RSI > 78 AND z-score > 2.5)
-  # Counter-trend trade: requires BOTH RSI extreme AND statistical extreme
-  - name: "QQQ Overbought Mean Reversion"
-    symbol: "QQQ"
-    asset_class: "stock"
-    trigger: "bar"
-    conditions:
-      - field: "rsi_21"
-        operator: ">"
-        value: 78.0
-      - field: "z_score_vwap_20"
-        operator: ">"
-        value: 2.5
-    action:
-      # Extreme overbought with dual confirmation - buy inverse ETF
-      command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
-    cooldown: 2700
