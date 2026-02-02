@@ -101,7 +101,7 @@ def main():
     parser = argparse.ArgumentParser(description="Add option stop-loss watch to streaming rules")
     parser.add_argument("symbol", help="Option symbol (e.g. AAPL230616C00150000)")
     parser.add_argument("stop_price", type=float, help="Stop price (bid)")
-    parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to streaming rules config")
+    parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to streaming rules config (file or directory)")
     
     args = parser.parse_args()
     add_option_watch(args.symbol, args.stop_price, args.config)

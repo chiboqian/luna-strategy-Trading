@@ -683,7 +683,7 @@ class StreamFramework:
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Alpaca Streaming Framework")
-    parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to rules config file")
+    parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to rules config file or directory")
     parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/streaming)")
     parser.add_argument("--log-file", help="Log file name (default: stream_framework.log)")
     args = parser.parse_args()
