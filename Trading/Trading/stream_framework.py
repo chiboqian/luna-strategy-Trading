@@ -9,7 +9,7 @@ import time
 import math
 import json
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -61,7 +61,7 @@ class StreamFramework:
         self.bar_history = {}
         history_dir = Path("trading_logs/streaming")
         history_dir.mkdir(parents=True, exist_ok=True)
-        today_str = datetime.utcnow().strftime("%Y-%m-%d")
+        today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         self.history_file = history_dir / f"bar_history_{today_str}.json"
         # Cooldown tracking: rule_name -> last_triggered_timestamp
         self.last_triggered = {}
@@ -148,8 +148,8 @@ class StreamFramework:
         # Avoid duplicating data if history file was already saved today
         if self.history_file.exists():
             mtime = self.history_file.stat().st_mtime
-            mdate = datetime.utcfromtimestamp(mtime).strftime("%Y-%m-%d")
-            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            mdate = datetime.fromtimestamp(mtime, timezone.utc).strftime("%Y-%m-%d")
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             
             if mdate == today_str:
                 logger.info("History file updated today. Skipping CSV load to avoid duplicates.")
@@ -157,7 +157,7 @@ class StreamFramework:
 
         logger.info(f"Checking for existing daily data in {self.stock_bar_file}...")
         try:
-            today_str = datetime.utcnow().strftime("%Y-%m-%d")
+            today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             count = 0
             
             with open(self.stock_bar_file, 'r') as f:
