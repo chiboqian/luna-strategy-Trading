@@ -38,7 +38,7 @@ rules:
         operator: ">"
         value: -1.5
     action:
-      command: "python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 600
 
   # Trend Monitor: SPY Downtrend (Price < SMA 50 AND SMA 200)
@@ -68,7 +68,7 @@ rules:
         value: 1.5
     action:
       # Buy SPXU (3x inverse SPY) instead of shorting UPRO
-      command: "python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 600
 
   # ============================================================================
@@ -90,7 +90,7 @@ rules:
         value: -2.5
     action:
       # Extreme oversold with dual confirmation - buy the dip
-      command: "python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 2700
 
   # Mean Reversion: SPY Overbought (RSI > 78 AND z-score > 2.5)
@@ -108,7 +108,7 @@ rules:
         value: 2.5
     action:
       # Extreme overbought with dual confirmation - buy inverse ETF
-      command: "python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 2700
 
   # ============================================================================
@@ -141,7 +141,7 @@ rules:
         operator: ">"
         value: -1.5
     action:
-      command: "python ./Trading/alpaca_buy_cli.py tqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py tqqq 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 600
 
   # Trend Monitor: QQQ Downtrend (Price < SMA 50 AND SMA 200)
@@ -171,7 +171,7 @@ rules:
         value: 1.5
     action:
       # Buy SQQQ (3x inverse QQQ) instead of shorting TQQQ
-      command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 600
 
   # ============================================================================
@@ -193,7 +193,7 @@ rules:
         value: -2.5
     action:
       # Extreme oversold with dual confirmation - buy the dip
-      command: "python ./Trading/alpaca_buy_cli.py tqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py tqqq 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 2700
 
   # Mean Reversion: QQQ Overbought (RSI > 78 AND z-score > 2.5)
@@ -211,7 +211,7 @@ rules:
         value: 2.5
     action:
       # Extreme overbought with dual confirmation - buy inverse ETF
-      command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2 --take-profit-pct 3"
+      command: "python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 0.5 --take-profit-pct 1.0"
     cooldown: 2700
 
   # ============================================================================
