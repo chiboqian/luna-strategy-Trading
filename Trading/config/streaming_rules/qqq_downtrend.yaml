@@ -1,0 +1,28 @@
+rules:
+- name: QQQ Downtrend
+  symbol: QQQ
+  asset_class: stock
+  trigger: bar
+  conditions:
+  - field: close
+    operator: <
+    value: sma_50
+  - field: close
+    operator: <
+    value: sma_200
+  - field: rsi_21
+    operator: '>'
+    value: 42.0
+  - field: rsi_21
+    operator: <
+    value: 58.0
+  - field: z_score_vwap_20
+    operator: '>'
+    value: -1.5
+  - field: z_score_vwap_20
+    operator: <
+    value: 1.5
+  action:
+    command: python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct
+      0.5 --take-profit-pct 1.0
+  cooldown: 600

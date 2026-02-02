@@ -34,7 +34,9 @@ except ImportError:
 class StreamFramework:
     def __init__(self, config_path: str, log_dir: Optional[str] = None, log_file: Optional[str] = None):
         load_dotenv()
-        self.config = self._load_config(config_path)
+        self.config_path = Path(config_path)
+        self.config = self._load_config(str(self.config_path))
+        self.last_mtime = self._get_config_mtime()
         
         setup_logging(log_dir, log_file, self.config, default_dir='trading_logs/streaming', default_file='stream_framework.log')
         
@@ -46,8 +48,9 @@ class StreamFramework:
         if not self.api_key or not self.secret_key:
             raise ValueError("ALPACA_API_KEY and ALPACA_API_SECRET must be set in environment variables.")
 
-        self.stock_stream = None
-        self.option_stream = None
+        # Initialize streams immediately so they are ready for dynamic subscriptions
+        self.stock_stream = StockDataStream(self.api_key, self.secret_key)
+        self.option_stream = OptionDataStream(self.api_key, self.secret_key)
         
         # Rules storage: symbol -> list of rules
         self.stock_rules = {}
@@ -66,7 +69,7 @@ class StreamFramework:
         
         self._load_history()
         self._load_daily_data()
-        self._setup_streams()
+        self._apply_config_rules()
 
     def _setup_data_recording(self):
         self.data_dir = Path("trading_logs/market_data")
@@ -188,17 +191,71 @@ class StreamFramework:
         except Exception as e:
             logger.error(f"Failed to save history: {e}")
 
-    def _load_config(self, path: str) -> Dict:
-        if not os.path.exists(path):
-            raise FileNotFoundError(f"Config file not found: {path}")
-        with open(path, 'r') as f:
-            return yaml.safe_load(f)
+    def _get_config_mtime(self) -> float:
+        """Get the latest modification time for config file or directory."""
+        if self.config_path.is_dir():
+            mtimes = [f.stat().st_mtime for f in self.config_path.glob("*.yaml")]
+            mtimes.append(self.config_path.stat().st_mtime)
+            return max(mtimes)
+        elif self.config_path.exists():
+            return self.config_path.stat().st_mtime
+        return 0.0
 
-    def _setup_streams(self):
+    def _load_config(self, path: str) -> Dict:
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"Config file not found: {path}")
+            
+        if p.is_dir():
+            combined_rules = []
+            for f in sorted(p.glob("*.yaml")):
+                try:
+                    with open(f, 'r') as file:
+                        data = yaml.safe_load(file)
+                        if not data: continue
+                        
+                        if isinstance(data, dict):
+                            # Case 1: File contains 'rules' list and potentially other settings
+                            if 'rules' in data:
+                                if isinstance(data['rules'], list):
+                                    combined_rules.extend(data['rules'])
+                                # Merge other top-level keys (e.g. logging) into final config?
+                                # The current structure returns {'rules': ...}. 
+                                # We need to return a merged dict.
+                                pass 
+                            # Case 2: File is a single rule (heuristic)
+                            elif 'symbol' in data and 'asset_class' in data:
+                                combined_rules.append(data)
+                        elif isinstance(data, list):
+                            combined_rules.extend(data)
+                except Exception as e:
+                    logger.error(f"Error loading config file {f}: {e}")
+            
+            # Re-scan to merge global settings properly
+            final_config = {'rules': combined_rules}
+            for f in sorted(p.glob("*.yaml")):
+                try:
+                    with open(f, 'r') as file:
+                        data = yaml.safe_load(file)
+                        if isinstance(data, dict) and 'rules' not in data and 'symbol' not in data:
+                            # Assume it's a settings file (e.g. logging: ...)
+                            final_config.update(data)
+                except: pass
+            return final_config
+        else:
+            with open(p, 'r') as f:
+                return yaml.safe_load(f)
+
+    def _apply_config_rules(self):
+        """Parses config and updates subscriptions."""
         rules = self.config.get('rules', [])
         stock_symbols = set()
         stock_bar_symbols = set()
         option_symbols = set()
+
+        # Reset rules mapping (but keep streams running)
+        self.stock_rules = {}
+        self.option_rules = {}
 
         for rule in rules:
             # Default to stock if not specified
@@ -224,21 +281,16 @@ class StreamFramework:
                     self.option_rules[symbol] = []
                 self.option_rules[symbol].append(rule)
 
-        # Initialize Stock Stream if needed
+        # Update Subscriptions
         if stock_symbols:
-            self.stock_stream = StockDataStream(self.api_key, self.secret_key)
             self.stock_stream.subscribe_quotes(self._handle_stock_quote, *stock_symbols)
             logger.info(f"Subscribed to STOCK quotes: {stock_symbols}")
             
         if stock_bar_symbols:
-            if not self.stock_stream:
-                self.stock_stream = StockDataStream(self.api_key, self.secret_key)
             self.stock_stream.subscribe_bars(self._handle_stock_bar, *stock_bar_symbols)
             logger.info(f"Subscribed to STOCK bars: {stock_bar_symbols}")
 
-        # Initialize Option Stream if needed
         if option_symbols:
-            self.option_stream = OptionDataStream(self.api_key, self.secret_key)
             self.option_stream.subscribe_quotes(self._handle_option_quote, *option_symbols)
             logger.info(f"Subscribed to OPTION quotes: {option_symbols}")
 
@@ -523,15 +575,33 @@ class StreamFramework:
                 except Exception as e:
                     logger.error(f"   ❌ Failed to execute action for {rule_name}: {e}")
 
+    async def _watch_config_changes(self):
+        """Watches for changes in the config file and reloads rules dynamically."""
+        while True:
+            await asyncio.sleep(5)
+            try:
+                current_mtime = self._get_config_mtime()
+                if current_mtime > self.last_mtime:
+                    logger.info("Config file changed. Reloading rules...")
+                    self.last_mtime = current_mtime
+                    self.config = self._load_config(str(self.config_path))
+                    self._apply_config_rules()
+            except Exception as e:
+                logger.error(f"Error watching config file: {e}")
+
     async def run(self):
         tasks = []
         loop = asyncio.get_running_loop()
-        if self.stock_stream:
-            self.stock_stream._loop = loop
-            tasks.append(self.stock_stream._run_forever())
-        if self.option_stream:
-            self.option_stream._loop = loop
-            tasks.append(self.option_stream._run_forever())
+        
+        # Always run streams (they handle empty subscriptions gracefully)
+        self.stock_stream._loop = loop
+        tasks.append(self.stock_stream._run_forever())
+        
+        self.option_stream._loop = loop
+        tasks.append(self.option_stream._run_forever())
+        
+        # Add config watcher
+        tasks.append(self._watch_config_changes())
         
         if not tasks:
             logger.warning("No streams configured. Please check your config file.")

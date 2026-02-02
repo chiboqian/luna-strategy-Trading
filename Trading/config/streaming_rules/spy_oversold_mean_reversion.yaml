@@ -1,0 +1,16 @@
+rules:
+- name: SPY Oversold Mean Reversion
+  symbol: SPY
+  asset_class: stock
+  trigger: bar
+  conditions:
+  - field: rsi_21
+    operator: <
+    value: 22.0
+  - field: z_score_vwap_20
+    operator: <
+    value: -2.5
+  action:
+    command: python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct
+      0.5 --take-profit-pct 1.0
+  cooldown: 2700

@@ -1,0 +1,16 @@
+rules:
+- name: QQQ Overbought Mean Reversion
+  symbol: QQQ
+  asset_class: stock
+  trigger: bar
+  conditions:
+  - field: rsi_21
+    operator: '>'
+    value: 78.0
+  - field: z_score_vwap_20
+    operator: '>'
+    value: 2.5
+  action:
+    command: python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct
+      0.5 --take-profit-pct 1.0
+  cooldown: 2700
