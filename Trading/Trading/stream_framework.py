@@ -266,27 +266,33 @@ class StreamFramework:
             
         now = datetime.now(tz)
         
-        # Check Weekends
+        # Default to active unless restricted
+        is_active = True
+        
+        # 1. Check Weekends
         if not schedule.get('run_on_weekends', False):
             if now.weekday() >= 5: # 5=Saturday, 6=Sunday
                 is_active = False
-            else:
-                # Check Time Windows
-                windows = schedule.get('windows', [])
-                if not windows:
-                    is_active = True
-                else:
+        
+        # 2. Check Time Windows (only if currently active day)
+        if is_active:
+            windows = schedule.get('windows', [])
+            if windows:
+                # If windows are defined, we must be inside one of them
+                in_window = False
+                current_time_str = now.strftime("%H:%M")
+                for window in windows:
+                    # Format "09:30-16:00"
+                    try:
+                        start_str, end_str = window.split('-')
+                        if start_str.strip() <= current_time_str <= end_str.strip():
+                            in_window = True
+                            break
+                    except ValueError:
+                        logger.warning(f"Invalid window format: {window}")
+                
+                if not in_window:
                     is_active = False
-                    current_time_str = now.strftime("%H:%M")
-                    for window in windows:
-                        # Format "09:30-16:00"
-                        try:
-                            start_str, end_str = window.split('-')
-                            if start_str.strip() <= current_time_str <= end_str.strip():
-                                is_active = True
-                                break
-                        except ValueError:
-                            logger.warning(f"Invalid window format: {window}")
 
         # Log state changes
         if is_active != self.schedule_active:
