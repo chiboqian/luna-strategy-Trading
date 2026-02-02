@@ -46,7 +46,7 @@ def main():
     parser.add_argument("symbols", nargs="*", help="List of symbols to close (e.g. AAPL MSFT)")
     parser.add_argument("--all", action="store_true", help="Close ALL open positions")
     parser.add_argument("--qty", type=float, help="Quantity to close (for single symbol only)")
-    parser.add_argument("--pct", type=float, help="Percentage to close (e.g. 50 for 50%)")
+    parser.add_argument("--pct", type=float, help="Percentage to close (e.g. 50 for 50%%)")
     parser.add_argument("--cancel-orders", action="store_true", help="Cancel open orders for these symbols before closing")
     parser.add_argument("--scan-rules", action="store_true", help="Scan streaming_rules directory for symbols to close")
     parser.add_argument("--rules-dir", help="Directory containing streaming rules (default: Trading/config/streaming_rules)")
