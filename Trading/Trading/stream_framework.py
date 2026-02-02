@@ -12,6 +12,7 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from logging_config import setup_logging
 
@@ -69,6 +70,8 @@ class StreamFramework:
         
         self._load_history()
         self._load_daily_data()
+        
+        self.schedule_active = True
         self._apply_config_rules()
 
     def _setup_data_recording(self):
@@ -245,6 +248,53 @@ class StreamFramework:
         else:
             with open(p, 'r') as f:
                 return yaml.safe_load(f)
+
+    def _check_schedule(self) -> bool:
+        """Checks if current time is within configured schedule windows."""
+        schedule = self.config.get('schedule')
+        
+        # If no schedule config, default to Always Active
+        if not schedule or not schedule.get('enabled', False):
+            return True
+            
+        tz_name = schedule.get('timezone', 'America/New_York')
+        try:
+            tz = ZoneInfo(tz_name)
+        except Exception as e:
+            logger.error(f"Invalid timezone {tz_name}: {e}")
+            return True
+            
+        now = datetime.now(tz)
+        
+        # Check Weekends
+        if not schedule.get('run_on_weekends', False):
+            if now.weekday() >= 5: # 5=Saturday, 6=Sunday
+                is_active = False
+            else:
+                # Check Time Windows
+                windows = schedule.get('windows', [])
+                if not windows:
+                    is_active = True
+                else:
+                    is_active = False
+                    current_time_str = now.strftime("%H:%M")
+                    for window in windows:
+                        # Format "09:30-16:00"
+                        try:
+                            start_str, end_str = window.split('-')
+                            if start_str.strip() <= current_time_str <= end_str.strip():
+                                is_active = True
+                                break
+                        except ValueError:
+                            logger.warning(f"Invalid window format: {window}")
+
+        # Log state changes
+        if is_active != self.schedule_active:
+            self.schedule_active = is_active
+            status = "ACTIVE" if is_active else "PAUSED (Outside Schedule)"
+            logger.info(f"📅 Schedule Update: Framework is now {status} ({now.strftime('%H:%M')} {tz_name})")
+            
+        return is_active
 
     def _apply_config_rules(self):
         """Parses config and updates subscriptions."""
