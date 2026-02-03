@@ -47,7 +47,7 @@ async def verify_credentials(
 app = FastAPI(title="Vertex AI API", dependencies=[Depends(verify_credentials)])
 
 class RunSessionRequest(BaseModel):
-    command_config: str = "config/commands.yaml"
+    command_config: str = "config/commands.v1.yaml"
     session_id: Optional[str] = None
     config: Optional[str] = None
 
