@@ -709,6 +709,12 @@ class StreamFramework:
                 logger.error("   You are likely trying to use 'sip' (paid) without a subscription.")
                 logger.error("   -> Please switch to 'iex' (free) in your config or CLI arguments.")
                 return
+            if "connection limit exceeded" in str(e):
+                logger.error("❌ CRITICAL ERROR: Connection limit exceeded.")
+                logger.error("   Alpaca limits concurrent connections. You may have another script running or a zombie connection.")
+                logger.error("   Waiting 45 seconds to allow connections to reset before exiting...")
+                await asyncio.sleep(45)
+                return
             logger.error(f"Unexpected error in run loop: {e}", exc_info=True)
             raise e
         finally:
