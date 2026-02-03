@@ -235,7 +235,7 @@ def monitor_orders(req: MonitorOrdersRequest):
             detail="Either 'order_ids' or 'session_id' must be provided"
         )
     
-    script = BASE_DIR / "util" / "monitor_orders.py"
+    script = BASE_DIR / "stock_trading" / "monitor_orders.py"
     args = []
     
     # Use session_id if provided, otherwise use order_ids
