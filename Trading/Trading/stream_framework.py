@@ -673,16 +673,24 @@ class StreamFramework:
             except Exception as e:
                 logger.error(f"Error watching config file: {e}")
 
+    async def _safe_stream_runner(self, stream, name):
+        """Runs a stream and logs any errors that cause it to exit."""
+        try:
+            await stream._run_forever()
+        except Exception as e:
+            logger.error(f"Stream {name} crashed: {e}", exc_info=True)
+            raise e
+
     async def run(self):
         tasks = []
         loop = asyncio.get_running_loop()
         
         # Always run streams (they handle empty subscriptions gracefully)
         self.stock_stream._loop = loop
-        tasks.append(self.stock_stream._run_forever())
+        tasks.append(self._safe_stream_runner(self.stock_stream, "StockStream"))
         
         self.option_stream._loop = loop
-        tasks.append(self.option_stream._run_forever())
+        tasks.append(self._safe_stream_runner(self.option_stream, "OptionStream"))
         
         # Add config watcher
         tasks.append(self._watch_config_changes())
@@ -701,6 +709,7 @@ class StreamFramework:
                 logger.error("   You are likely trying to use 'sip' (paid) without a subscription.")
                 logger.error("   -> Please switch to 'iex' (free) in your config or CLI arguments.")
                 return
+            logger.error(f"Unexpected error in run loop: {e}", exc_info=True)
             raise e
         finally:
             self._save_history()
