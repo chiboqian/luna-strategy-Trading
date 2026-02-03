@@ -71,8 +71,9 @@ class StreamFramework:
         self._load_history()
         self._load_daily_data()
         
-        self.schedule_active = True
+        self.schedule_active = None
         self._apply_config_rules()
+        self._check_schedule()
 
     def _setup_data_recording(self):
         self.data_dir = Path("trading_logs/market_data")
