@@ -28,6 +28,7 @@ try:
     from alpaca.data.live.stock import StockDataStream
     from alpaca.data.live.option import OptionDataStream
     from alpaca.data.models import Quote, Bar
+    from alpaca.data.enums import DataFeed
 except ImportError:
     logger.error("alpaca-py is required. Please install it: pip install alpaca-py")
     sys.exit(1)
@@ -51,11 +52,18 @@ class StreamFramework:
 
         # Determine data feed
         # Priority: CLI arg > Config file > Default 'iex'
-        self.data_feed = data_feed
-        if not self.data_feed:
-            self.data_feed = self.config.get('data_feed', 'iex')
-        self.data_feed = self.data_feed.lower()
-        logger.info(f"Initializing StockDataStream with feed: {self.data_feed}")
+        data_feed_str = data_feed
+        if not data_feed_str:
+            data_feed_str = self.config.get('data_feed', 'iex')
+        data_feed_str = data_feed_str.lower()
+        
+        if data_feed_str == 'sip':
+            self.data_feed = DataFeed.SIP
+        elif data_feed_str == 'otc':
+            self.data_feed = DataFeed.OTC
+        else:
+            self.data_feed = DataFeed.IEX
+        logger.info(f"Initializing StockDataStream with feed: {data_feed_str}")
 
         # Initialize streams immediately so they are ready for dynamic subscriptions
         self.stock_stream = StockDataStream(self.api_key, self.secret_key, feed=self.data_feed)
