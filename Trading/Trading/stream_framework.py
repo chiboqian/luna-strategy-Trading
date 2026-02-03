@@ -675,22 +675,11 @@ class StreamFramework:
 
     async def _safe_stream_runner(self, stream, name):
         """Runs a stream and logs any errors that cause it to exit."""
-        while True:
-            try:
-                await stream._run_forever()
-                logger.warning(f"Stream {name} exited cleanly. Restarting in 5s...")
-                await asyncio.sleep(5)
-            except Exception as e:
-                logger.error(f"Stream {name} crashed: {e}")
-                if "connection limit exceeded" in str(e):
-                    logger.error(f"{name}: Connection limit exceeded. Waiting 60s before retry...")
-                    await asyncio.sleep(60)
-                elif "insufficient subscription" in str(e):
-                    logger.error(f"{name}: Insufficient subscription. Stream disabled.")
-                    return
-                else:
-                    logger.warning(f"{name}: Unexpected error. Restarting in 10s...")
-                    await asyncio.sleep(10)
+        try:
+            await stream._run_forever()
+        except Exception as e:
+            logger.error(f"Stream {name} crashed: {e}", exc_info=True)
+            raise e
 
     async def run(self):
         tasks = []
@@ -700,12 +689,8 @@ class StreamFramework:
         self.stock_stream._loop = loop
         tasks.append(self._safe_stream_runner(self.stock_stream, "StockStream"))
         
-        # Only run option stream if we have option rules to save connections
-        if self.option_rules:
-            self.option_stream._loop = loop
-            tasks.append(self._safe_stream_runner(self.option_stream, "OptionStream"))
-        else:
-            logger.info("No option rules configured. Option stream disabled to save connections.")
+        self.option_stream._loop = loop
+        tasks.append(self._safe_stream_runner(self.option_stream, "OptionStream"))
         
         # Add config watcher
         tasks.append(self._watch_config_changes())
@@ -717,8 +702,21 @@ class StreamFramework:
         logger.info("Starting streams... Press Ctrl+C to stop.")
         try:
             await asyncio.gather(*tasks)
-        except KeyboardInterrupt:
-            logger.info("Stopping streams...")
+        except Exception as e:
+            # Handle subscription errors gracefully
+            if "insufficient subscription" in str(e):
+                logger.error("❌ CRITICAL ERROR: Insufficient subscription for the requested data feed.")
+                logger.error("   You are likely trying to use 'sip' (paid) without a subscription.")
+                logger.error("   -> Please switch to 'iex' (free) in your config or CLI arguments.")
+                return
+            if "connection limit exceeded" in str(e):
+                logger.error("❌ CRITICAL ERROR: Connection limit exceeded.")
+                logger.error("   Alpaca limits concurrent connections. You may have another script running or a zombie connection.")
+                logger.error("   Waiting 45 seconds to allow connections to reset before exiting...")
+                await asyncio.sleep(45)
+                return
+            logger.error(f"Unexpected error in run loop: {e}", exc_info=True)
+            raise e
         finally:
             self._save_history()
             self._close_data_recording()
