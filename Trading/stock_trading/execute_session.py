@@ -33,6 +33,7 @@ def load_environment():
     if 'load_dotenv' in globals():
         load_dotenv(BASE_DIR / ".env")
         load_dotenv(BASE_DIR.parent / ".env")
+        load_dotenv(BASE_DIR.parent / "AI" / ".env")
 
 def load_min_score_from_config() -> float:
     cfg_path = BASE_DIR / 'config' / 'Trading.yaml'
@@ -220,6 +221,7 @@ def get_session_analysis(session_id: str) -> List[Dict[str, Any]]:
     api_token = os.getenv("CLOUDFLARE_API_TOKEN")
 
     if not all([account_id, database_id, api_token]):
+        print("Warning: Missing Cloudflare D1 credentials in environment.", file=sys.stderr)
         return []
 
     api_url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/d1/database/{database_id}/query"
@@ -241,6 +243,8 @@ def get_session_analysis(session_id: str) -> List[Dict[str, Any]]:
         if data.get("success") and data.get("result"):
             results = data["result"][0]["results"]
             return results
+        elif not data.get("success"):
+             print(f"D1 Query Error: {data.get('errors')}", file=sys.stderr)
     except Exception as e:
         print(f"Error querying symbol_analysis: {e}", file=sys.stderr)
         
