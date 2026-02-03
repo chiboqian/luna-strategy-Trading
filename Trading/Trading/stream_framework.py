@@ -29,7 +29,8 @@ try:
     from alpaca.data.live.option import OptionDataStream
     from alpaca.data.models import Quote, Bar
     from alpaca.data.enums import DataFeed
-except ImportError:
+except ImportError as e:
+    logger.error(f"Failed to import alpaca-py: {e}")
     logger.error("alpaca-py is required. Please install it: pip install alpaca-py")
     sys.exit(1)
 
