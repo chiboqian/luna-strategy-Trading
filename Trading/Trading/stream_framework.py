@@ -256,6 +256,8 @@ class StreamFramework:
         
         # If no schedule config, default to Always Active
         if not schedule or not schedule.get('enabled', False):
+            if self.schedule_active is None:
+                logger.info("No schedule configured or enabled. Running 24/7.")
             return True
             
         tz_name = schedule.get('timezone', 'America/New_York')
