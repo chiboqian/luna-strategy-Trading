@@ -24,7 +24,7 @@ def add_option_watch(symbol, stop_price, config_path):
             "value": float(stop_price)
         },
         "action": {
-            "command": f"python Trading/Trading/alpaca_cli.py close --symbol {symbol}"
+            "command": f"python Trading/Trading/alpaca_close_cli.py {symbol}"
         },
         "one_off": True
     }

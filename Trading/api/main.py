@@ -291,7 +291,7 @@ def execute_sells(req: ExecuteSellsRequest):
 
 @app.post("/execute/all")
 def execute_all(req: ExecuteTradesRequest):
-    script = BASE_DIR / "util" / "execute_session.py"
+    script = BASE_DIR / "stock_trading" / "execute_session.py"
     args = []
     
     # Session ID
@@ -342,7 +342,7 @@ def execute_all(req: ExecuteTradesRequest):
 
 @app.post("/positions/close-old")
 def close_old_positions(req: CloseOldPositionsRequest):
-    script = BASE_DIR / "util" / "close_old_positions.py"
+    script = BASE_DIR / "stock_trading" / "close_old_positions.py"
     args = ["--json"]
     if req.days:
         args.extend(["--days", str(req.days)])
@@ -364,7 +364,7 @@ def close_old_positions(req: CloseOldPositionsRequest):
 
 @app.post("/execute/synthetic_long")
 def execute_synthetic_long(req: SyntheticLongRequest):
-    script = BASE_DIR / "util" / "synthetic_long.py"
+    script = BASE_DIR / "options_trading" / "synthetic_long.py"
     args = [req.symbol]
     
     if req.quantity:
@@ -421,28 +421,26 @@ def get_sell_recommendations(req: GetRecommendationsRequest):
 
 @app.post("/orders/buy")
 def execute_single_buy(req: ExecuteSingleBuyRequest):
-    script = BASE_DIR / "util" / "execute_single_buy.py"
+    script = BASE_DIR / "Trading" / "alpaca_buy_cli.py"
     args = [req.symbol]
     if req.dollars:
-        args.extend(["--dollars", str(req.dollars)])
+        args.append(str(req.dollars))
     if req.market:
         args.append("--market")
     if req.mid_price:
         args.append("--mid-price")
     if req.verbose:
         args.append("--verbose")
-    if req.recommendation:
-        args.extend(["--recommendation", req.recommendation])
         
     env_vars = get_alpaca_env(req)
     return run_script(script, args, env_vars)
 
 @app.post("/orders/sell")
 def execute_single_sell(req: ExecuteSingleSellRequest):
-    script = BASE_DIR / "util" / "execute_single_sell.py"
+    script = BASE_DIR / "Trading" / "alpaca_short_sell_cli.py"
     args = [req.symbol]
     if req.dollars:
-        args.extend(["--dollars", str(req.dollars)])
+        args.append(str(req.dollars))
     if req.market:
         args.append("--market")
     if req.mid_price:
@@ -453,8 +451,6 @@ def execute_single_sell(req: ExecuteSingleSellRequest):
         args.extend(["--price-offset", str(req.price_offset)])
     if req.verbose:
         args.append("--verbose")
-    if req.recommendation:
-        args.extend(["--recommendation", req.recommendation])
         
     env_vars = get_alpaca_env(req)
     return run_script(script, args, env_vars)
@@ -480,7 +476,7 @@ def check_market_status(req: MarketStatusRequest):
 
 @app.post("/account/summary")
 def get_account_summary(req: AccountSummaryRequest):
-    script = BASE_DIR / "util" / "account_summary.py"
+    script = BASE_DIR / "Trading" / "account_summary.py"
     args = ["--json"]
     
     env_vars = get_alpaca_env(req)
