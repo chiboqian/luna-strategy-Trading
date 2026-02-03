@@ -33,7 +33,7 @@ except ImportError:
     sys.exit(1)
 
 class StreamFramework:
-    def __init__(self, config_path: str, log_dir: Optional[str] = None, log_file: Optional[str] = None):
+    def __init__(self, config_path: str, log_dir: Optional[str] = None, log_file: Optional[str] = None, data_feed: Optional[str] = None):
         load_dotenv()
         self.config_path = Path(config_path)
         self.config = self._load_config(str(self.config_path))
@@ -49,8 +49,16 @@ class StreamFramework:
         if not self.api_key or not self.secret_key:
             raise ValueError("ALPACA_API_KEY and ALPACA_API_SECRET must be set in environment variables.")
 
+        # Determine data feed
+        # Priority: CLI arg > Config file > Default 'iex'
+        self.data_feed = data_feed
+        if not self.data_feed:
+            self.data_feed = self.config.get('data_feed', 'iex')
+        self.data_feed = self.data_feed.lower()
+        logger.info(f"Initializing StockDataStream with feed: {self.data_feed}")
+
         # Initialize streams immediately so they are ready for dynamic subscriptions
-        self.stock_stream = StockDataStream(self.api_key, self.secret_key)
+        self.stock_stream = StockDataStream(self.api_key, self.secret_key, feed=self.data_feed)
         self.option_stream = OptionDataStream(self.api_key, self.secret_key)
         
         # Rules storage: symbol -> list of rules
@@ -695,6 +703,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", default="Trading/config/streaming_rules.yaml", help="Path to rules config file or directory")
     parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/streaming)")
     parser.add_argument("--log-file", help="Log file name (default: stream_framework.log)")
+    parser.add_argument("--feed", help="Data feed for stocks (iex or sip)")
     args = parser.parse_args()
 
     # Resolve config path
@@ -714,7 +723,7 @@ if __name__ == "__main__":
                  print(f"Error: Config file not found at {config_path}")
                  sys.exit(1)
 
-    framework = StreamFramework(str(config_path), log_dir=args.log_dir, log_file=args.log_file)
+    framework = StreamFramework(str(config_path), log_dir=args.log_dir, log_file=args.log_file, data_feed=args.feed)
     
     try:
         asyncio.run(framework.run())
