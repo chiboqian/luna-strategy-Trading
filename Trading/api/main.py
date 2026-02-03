@@ -466,7 +466,7 @@ def execute_single_sell(req: ExecuteSingleSellRequest):
 
 @app.post("/positions/close")
 def close_positions(req: ClosePositionsRequest):
-    script = BASE_DIR / "alpaca_close_cli.py"
+    script = BASE_DIR / "Trading" / "alpaca_close_cli.py"
     args = []
     
     if req.symbols:
