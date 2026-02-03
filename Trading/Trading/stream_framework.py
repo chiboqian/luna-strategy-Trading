@@ -32,6 +32,8 @@ try:
 except ImportError as e:
     logger.error(f"Failed to import alpaca-py: {e}")
     logger.error("alpaca-py is required. Please install it: pip install alpaca-py")
+    if "pytz" in str(e):
+        logger.error("Missing dependency 'pytz'. Please install it: pip install pytz")
     sys.exit(1)
 
 class StreamFramework:
