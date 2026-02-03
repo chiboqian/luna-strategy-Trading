@@ -691,6 +691,14 @@ class StreamFramework:
         logger.info("Starting streams... Press Ctrl+C to stop.")
         try:
             await asyncio.gather(*tasks)
+        except Exception as e:
+            # Handle subscription errors gracefully
+            if "insufficient subscription" in str(e):
+                logger.error("❌ CRITICAL ERROR: Insufficient subscription for the requested data feed.")
+                logger.error("   You are likely trying to use 'sip' (paid) without a subscription.")
+                logger.error("   -> Please switch to 'iex' (free) in your config or CLI arguments.")
+                return
+            raise e
         finally:
             self._save_history()
             self._close_data_recording()

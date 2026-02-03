@@ -14,7 +14,7 @@ schedule:
   windows:
     - "09:30-15:50"
 
-data_feed: iex # Options: iex (free), sip (paid)
+data_feed: iex # Options: iex (free), sip (paid). Use 'iex' if you don't have a paid subscription.
 
 rules:
   # ============================================================================
