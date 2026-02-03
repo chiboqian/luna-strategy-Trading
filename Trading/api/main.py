@@ -136,6 +136,15 @@ class ExecuteSingleSellRequest(BaseRequest):
     verbose: bool = False
     recommendation: Optional[str] = None
 
+class ClosePositionsRequest(BaseRequest):
+    symbols: Optional[List[str]] = None
+    close_all: bool = False
+    qty: Optional[float] = None
+    pct: Optional[float] = None
+    cancel_orders: bool = False
+    scan_rules: bool = False
+    dry_run: bool = False
+
 class MonitorOrdersRequest(BaseRequest):
     order_ids: Optional[List[str]] = None
     session_id: Optional[str] = None
@@ -147,7 +156,7 @@ class MarketStatusRequest(BaseRequest):
     min_minutes: Optional[int] = None
 
 class AccountSummaryRequest(BaseRequest):
-    pass
+    format: str = "json"  # json, text, html
 
 def get_alpaca_env(req: BaseRequest) -> dict:
     env_vars = {}
@@ -455,6 +464,39 @@ def execute_single_sell(req: ExecuteSingleSellRequest):
     env_vars = get_alpaca_env(req)
     return run_script(script, args, env_vars)
 
+@app.post("/positions/close")
+def close_positions(req: ClosePositionsRequest):
+    script = BASE_DIR / "alpaca_close_cli.py"
+    args = []
+    
+    if req.symbols:
+        args.extend(req.symbols)
+    if req.close_all:
+        args.append("--all")
+    if req.qty:
+        args.extend(["--qty", str(req.qty)])
+    if req.pct:
+        args.extend(["--pct", str(req.pct)])
+    if req.cancel_orders:
+        args.append("--cancel-orders")
+    if req.scan_rules:
+        args.append("--scan-rules")
+    if req.dry_run:
+        args.append("--dry-run")
+        
+    args.append("--json")
+    
+    env_vars = get_alpaca_env(req)
+    result = run_script(script, args, env_vars)
+    
+    if result["stdout"]:
+        try:
+            return json.loads(result["stdout"])
+        except json.JSONDecodeError:
+            pass
+            
+    return result
+
 @app.post("/market/status")
 def check_market_status(req: MarketStatusRequest):
     script = BASE_DIR / "Trading" / "market_open.py"
@@ -477,17 +519,28 @@ def check_market_status(req: MarketStatusRequest):
 @app.post("/account/summary")
 def get_account_summary(req: AccountSummaryRequest):
     script = BASE_DIR / "Trading" / "account_summary.py"
-    args = ["--json"]
+    args = []
+    
+    if req.format == "json":
+        args.append("--format=json")
+    elif req.format == "html":
+        args.append("--format=html")
+    else:
+        args.append("--format=text")
     
     env_vars = get_alpaca_env(req)
     result = run_script(script, args, env_vars)
     
-    if result["stdout"]:
+    if req.format == "json" and result["stdout"]:
         try:
             return json.loads(result["stdout"])
         except json.JSONDecodeError:
             pass
-            
+    
+    # For text/html, return the raw stdout wrapped in a JSON response
+    if req.format != "json" and result["success"]:
+        return {"data": result["stdout"], "success": True}
+
     return result
 
 @app.get("/trading/keys")
@@ -574,6 +627,7 @@ def root():
             "/execute/sells",
             "/execute/synthetic_long",
             "/positions/close-old",
+            "/positions/close",
             "/recommendations/buys",
             "/recommendations/sells",
             "/orders/buy",
