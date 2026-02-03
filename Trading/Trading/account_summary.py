@@ -136,12 +136,12 @@ def main():
 
         if args.format == 'json':
             # Generate text report to include in JSON for convenience
-            text_report = generate_text_report(account, positions, metrics)
+            html_report = generate_html_report(account, positions, metrics)
             summary = {
                 "account": account,
                 "positions": positions,
                 "metrics": metrics,
-                "email_text": text_report
+                "email_html": html_report
             }
             output_content = json.dumps(summary, indent=2)
         
