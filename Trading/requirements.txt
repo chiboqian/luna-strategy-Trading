@@ -4,3 +4,4 @@ PyYAML
 boto3
 ibapi
 databento
+uvicorn>=0.20.0
