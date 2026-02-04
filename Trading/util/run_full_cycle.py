@@ -37,6 +37,7 @@ def main():
     project_root = trading_root.parent        # Project root
     
     run_session_script = project_root / "AI" / "util" / "run_session.py"
+    ai_dir = project_root / "AI"
     execute_session_script = trading_root / "stock_trading" / "execute_session.py"
     
     if not run_session_script.exists():
@@ -54,11 +55,11 @@ def main():
     
     cmd_session = [sys.executable, str(run_session_script)]
     if args.command_config:
-        cmd_session.extend(["--command-config", args.command_config])
+        cmd_session.extend(["--command-config", str(Path(args.command_config).resolve())])
     if args.prompts:
         cmd_session.extend(["--prompts"] + args.prompts)
     if args.ai_config:
-        cmd_session.extend(["--config", args.ai_config])
+        cmd_session.extend(["--config", str(Path(args.ai_config).resolve())])
         
     print(f"Executing: {' '.join(cmd_session)}")
     
@@ -72,7 +73,8 @@ def main():
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
-            bufsize=1
+            bufsize=1,
+            cwd=str(ai_dir)
         )
         
         full_output = []
