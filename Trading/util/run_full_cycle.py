@@ -61,12 +61,16 @@ def main():
             print(f"Error: Could not find {market_open_script}", file=sys.stderr)
             sys.exit(1)
             
-        print(f"Checking market status using {market_open_script.name}...")
+        print(f"Checking market status using {market_open_script.name}...", flush=True)
         # market_open.py returns 0 if open, 1 if closed
-        market_status = subprocess.call([sys.executable, str(market_open_script)])
-        if market_status != 0:
-            print("Market is closed or insufficient time remaining. Aborting cycle.")
+        # Capture output to prevent unbuffered interleaving and control logging
+        result = subprocess.run([sys.executable, str(market_open_script)], capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            print(f"Market is closed or insufficient time remaining. Output: {result.stdout.strip()}")
             sys.exit(0)
+        else:
+            print(f"Market status: OPEN")
 
     # 1. Run Session
     print("="*60)
