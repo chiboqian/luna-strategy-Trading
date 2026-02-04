@@ -6,7 +6,7 @@ module.exports = {
     interpreter: "./.venv/bin/python", // Points to your venv
     cwd: "/home/paper1/luna-strategy-Trading/Trading", // Ensure this path is correct
     autorestart: true,
-    watch: true,
+    watch: no,
     cron_restart: "0 9 * * *",
   }]
 };
