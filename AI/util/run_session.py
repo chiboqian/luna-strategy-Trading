@@ -101,7 +101,7 @@ class CloudflareLogger:
 
     def log_analysis_result(self, session_id: str, result: dict):
         """Logs a single analysis result to D1."""
-        now = datetime.datetime.utcnow().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         original_rating = result.get("analysis_rating", "")
         normalized_rating = self._normalize_rating(original_rating)
         
@@ -126,7 +126,7 @@ class CloudflareLogger:
 
     def update_consolidated_list(self, session_id: str, path: str):
         """Updates the consolidated list path for a session."""
-        now = datetime.datetime.utcnow().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         sql = """
         UPDATE sessions 
         SET consolidated_list_path = ?, updated_at = ?
@@ -137,7 +137,7 @@ class CloudflareLogger:
 
     def log_session(self, session_id: str, status: str):
         """Upserts session status."""
-        now = datetime.datetime.utcnow().isoformat()
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
         
         # Use simple Upsert (requires SQLite 3.24+)
         # This preserves other columns like consolidated_list_path that are not in the insert list
@@ -167,13 +167,13 @@ class R2Storage:
 
     def save_artifact(self, session_id: str, index: int, prompt: str, content: str):
         """Saves the output to R2."""
-        date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
         # Naming convention: {date}/{session_id}/{index}_output.json
         object_key = f"{date_str}/{session_id}/{index:03d}_output.json"
         
         data = {
             "session_id": session_id,
-            "timestamp": datetime.datetime.utcnow().isoformat(),
+            "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
             "prompt": prompt,
             "content": content
         }
@@ -342,7 +342,7 @@ def main():
                 
                 # Also save as consolidated-list inside the session directory for easier access
                 try:
-                    date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+                    date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
                     list_key = f"{date_str}/{session_id}/consolidated-list.json"
                     storage.s3_client.put_object(
                         Bucket=storage.bucket_name,
@@ -413,7 +413,7 @@ def main():
                             
                             # Also save as readable file
                             try:
-                                date_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+                                date_str = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
                                 dd_key = f"{date_str}/{session_id}/deep-dive-results.json"
                                 storage.s3_client.put_object(
                                     Bucket=storage.bucket_name,
