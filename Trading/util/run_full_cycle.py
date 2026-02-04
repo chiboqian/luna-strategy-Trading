@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--market", action="store_true", help="Use market orders")
     parser.add_argument("--limit", action="store_true", help="Use limit orders")
     parser.add_argument("--mid-price", action="store_true", help="Use mid price")
+    parser.add_argument("--check-market", action="store_true", help="Check if market is open before execution")
     
     args = parser.parse_args()
 
@@ -39,6 +40,7 @@ def main():
     run_session_script = project_root / "AI" / "util" / "run_session.py"
     ai_dir = project_root / "AI"
     execute_session_script = trading_root / "stock_trading" / "execute_session.py"
+    market_open_script = trading_root / "Trading" / "market_open.py"
     
     if not run_session_script.exists():
         print(f"Error: Could not find {run_session_script}", file=sys.stderr)
@@ -47,6 +49,18 @@ def main():
     if not execute_session_script.exists():
         print(f"Error: Could not find {execute_session_script}", file=sys.stderr)
         sys.exit(1)
+
+    if args.check_market:
+        if not market_open_script.exists():
+            print(f"Error: Could not find {market_open_script}", file=sys.stderr)
+            sys.exit(1)
+            
+        print(f"Checking market status using {market_open_script.name}...")
+        # market_open.py returns 0 if open, 1 if closed
+        market_status = subprocess.call([sys.executable, str(market_open_script)])
+        if market_status != 0:
+            print("Market is closed or insufficient time remaining. Aborting cycle.")
+            sys.exit(0)
 
     # 1. Run Session
     print("="*60)
