@@ -5,6 +5,7 @@ Get account summary and open positions.
 import argparse
 import json
 import sys
+import os
 from pathlib import Path
 
 # Add parent directory to path to import Trading modules if needed
@@ -23,6 +24,9 @@ except ImportError:
 def generate_html_report(account, positions, metrics):
     equity = float(account.get('equity', 0))
     buying_power = float(account.get('buying_power', 0))
+    account_number = account.get('account_number', 'N/A')
+    account_type = account.get('type', 'Unknown')
+    nickname = account.get('nickname', '')
     
     html = [
         "<html>",
@@ -38,6 +42,14 @@ def generate_html_report(account, positions, metrics):
         "</head>",
         "<body>",
         "    <h2>Account Summary</h2>",
+    ]
+    
+    if nickname:
+        html.append(f"    <p><strong>Nickname:</strong> {nickname}</p>")
+        
+    html.extend([
+        f"    <p><strong>Account Number:</strong> {account_number}</p>",
+        f"    <p><strong>Type:</strong> {account_type}</p>",
         f"    <p><strong>Equity:</strong> ${equity:,.2f}</p>",
         f"    <p><strong>Buying Power:</strong> ${buying_power:,.2f}</p>",
         f"    <p><strong>Day Change:</strong> <span class=\"{'positive' if metrics['day_change_pct'] >= 0 else 'negative'}\">{metrics['day_change_pct']:.2%}</span></p>",
@@ -52,7 +64,7 @@ def generate_html_report(account, positions, metrics):
         "            <th>Market Value</th>",
         "            <th>Unrealized P/L</th>",
         "        </tr>"
-    ]
+    ])
     
     for p in positions:
         pl = float(p.get('unrealized_pl', 0))
@@ -75,10 +87,17 @@ def generate_html_report(account, positions, metrics):
 def generate_text_report(account, positions, metrics):
     equity = float(account.get('equity', 0))
     buying_power = float(account.get('buying_power', 0))
+    account_number = account.get('account_number', 'N/A')
+    account_type = account.get('type', 'Unknown')
+    nickname = account.get('nickname', '')
     
     lines = []
     lines.append("Account Summary")
     lines.append("===============")
+    if nickname:
+        lines.append(f"Nickname:     {nickname}")
+    lines.append(f"Account Num:  {account_number}")
+    lines.append(f"Type:         {account_type}")
     lines.append(f"Equity:       ${equity:,.2f}")
     lines.append(f"Buying Power: ${buying_power:,.2f}")
     lines.append(f"Day Change:   {metrics['day_change_pct']:.2%}")
@@ -117,6 +136,11 @@ def main():
     try:
         client = AlpacaClient()
         account = client.get_account_info()
+        
+        # Enrich account info
+        account['type'] = "Paper" if "paper" in client.base_url.lower() else "Live"
+        account['nickname'] = os.getenv('ACCOUNT_NICKNAME', '')
+        
         positions = client.get_all_positions()
         
         # Calculate total P/L
