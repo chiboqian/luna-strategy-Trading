@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Wrapper script for running Python scripts via Cron
-# Usage: ./util/run_cron_job.sh path/to/script.py [args]
+# Usage: ./common/run_cron_job.sh path/to/script.py [args]
 
 # 1. Determine Project Root (assuming script is in Trading/util/)
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
@@ -26,7 +26,7 @@ if [ $# -eq 0 ]; then
 fi
 
 # Setup logging
-LOG_DIR="$PROJECT_DIR/trading_logs/cron"
+LOG_DIR="$PROJECT_DIR/logs/cron"
 mkdir -p "$LOG_DIR"
 
 SCRIPT_NAME=$(basename "$1")
@@ -35,4 +35,18 @@ LOG_FILE="$LOG_DIR/${SCRIPT_NAME}_${TIMESTAMP}.log"
 
 echo "[$(date)] Starting job: python $*" | tee -a "$LOG_FILE"
 python "$@" 2>&1 | tee -a "$LOG_FILE"
-exit ${PIPESTATUS[0]}
+EXIT_CODE=${PIPESTATUS[0]}
+
+# Email reporting
+# Use external python script to handle email logic (Gmail SMTP or local mail)
+SEND_EMAIL_SCRIPT="$PROJECT_DIR/common/send_email.py"
+
+if [ -f "$SEND_EMAIL_SCRIPT" ]; then
+    STATUS=$([ $EXIT_CODE -eq 0 ] && echo "SUCCESS" || echo "FAILURE")
+    SUBJECT="[$STATUS] Cron Job: $SCRIPT_NAME"
+    
+    # Execute email script
+    python "$SEND_EMAIL_SCRIPT" --subject "$SUBJECT" --body-file "$LOG_FILE" 2>&1 | tee -a "$LOG_FILE"
+fi
+
+exit $EXIT_CODE
