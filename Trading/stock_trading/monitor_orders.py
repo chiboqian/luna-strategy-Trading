@@ -29,7 +29,7 @@ import os
 import sys
 import time
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 
 import yaml
@@ -195,7 +195,7 @@ def update_order_in_d1(session_id: str, order_id: str, status: str, filled_qty: 
         "Content-Type": "application/json"
     }
 
-    updated_at = datetime.utcnow().isoformat()
+    updated_at = datetime.now(timezone.utc).isoformat()
 
     sql = """
     UPDATE orders 
@@ -254,7 +254,7 @@ def save_monitoring_results_to_r2(session_id: str, data: Dict[str, Any]):
             base_path = f"sessions/{session_id}"
 
     # Use timestamp to create unique filename to avoid overwriting
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     key = f"{base_path}/monitoring_results_{timestamp}.json"
 
     storage = R2Storage(account_id, access_key, secret_key, bucket_name)
@@ -475,7 +475,7 @@ def main():
         email_lines = []
         email_lines.append("Order Monitoring Report")
         email_lines.append("=" * 50)
-        email_lines.append(f"Monitored At: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC")
+    email_lines.append(f"Monitored At: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')} UTC")
         if session_id:
             email_lines.append(f"Session ID: {session_id}")
         email_lines.append(f"Total Orders: {len(orders)}")
@@ -525,7 +525,7 @@ def main():
                 "total_value": total_value
             },
             "session_id": session_id,
-            "monitored_at": datetime.utcnow().isoformat()
+            "monitored_at": datetime.now(timezone.utc).isoformat()
         }
         
         # Save to R2 if session_id is present

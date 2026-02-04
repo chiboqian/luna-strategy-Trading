@@ -6,7 +6,7 @@ Provides functions to interact with Alpaca trading platform
 import os
 import sys
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Union
 from enum import Enum
 from dotenv import load_dotenv
@@ -882,7 +882,7 @@ class AlpacaClient:
             return start
         
         delta = timedelta(days=days, hours=hours, minutes=minutes)
-        start_time = datetime.utcnow() - delta
+        start_time = datetime.now(timezone.utc) - delta
         return start_time.isoformat() + 'Z'
     
     def get_stock_bars(self, symbol: str, days: int = 5, hours: int = 0, minutes: int = 15,

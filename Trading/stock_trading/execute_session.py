@@ -13,7 +13,7 @@ import sys
 import subprocess
 import yaml
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 
 # Try imports that might be missing in basic envs
@@ -177,8 +177,8 @@ def log_order_to_d1(session_id: str, order_data: Dict[str, Any]):
     # type can be 'type' (Alpaca API) or 'order_type' (our CLI)
     order_type = order_data.get('type') or order_data.get('order_type')
     
-    created_at = order_data.get('created_at') or datetime.utcnow().isoformat()
-    updated_at = order_data.get('updated_at') or datetime.utcnow().isoformat()
+    created_at = order_data.get('created_at') or datetime.now(timezone.utc).isoformat()
+    updated_at = order_data.get('updated_at') or datetime.now(timezone.utc).isoformat()
 
     sql = """
     INSERT OR REPLACE INTO orders 
@@ -285,7 +285,7 @@ def save_execution_results_to_r2(session_id: str, data: Dict[str, Any]):
              base_path = f"sessions/{session_id}"
 
     # Use timestamp to create unique filename to avoid overwriting
-    timestamp = datetime.utcnow().strftime("%Y%m%d-%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     key = f"{base_path}/execution_results_{timestamp}.json"
 
     storage = R2Storage(account_id, access_key, secret_key, bucket_name)
