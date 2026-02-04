@@ -46,7 +46,7 @@ def main():
     run_session_script = project_root / "AI" / "util" / "run_session.py"
     ai_dir = project_root / "AI"
     execute_session_script = trading_root / "stock_trading" / "execute_session.py"
-    market_open_script = trading_root / "market_open.py"
+    market_open_script = trading_root / "util" / "market_open.py"
     
     if not run_session_script.exists():
         print(f"Error: Could not find {run_session_script}", file=sys.stderr)
