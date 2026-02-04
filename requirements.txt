@@ -1,0 +1,13 @@
+PyYAML
+alpaca-py
+boto3
+databento
+fastapi
+google
+google-auth
+google-genai
+ibapi
+python-dotenv
+pytz
+requests
+uvicorn
