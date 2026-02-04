@@ -26,7 +26,7 @@ if [ $# -eq 0 ]; then
 fi
 
 # Setup logging
-LOG_DIR="$PROJECT_DIR/logs/cron"
+LOG_DIR="$PROJECT_DIR/logs/"
 mkdir -p "$LOG_DIR"
 
 SCRIPT_NAME=$(basename "$1")
