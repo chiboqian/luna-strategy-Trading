@@ -34,13 +34,19 @@ def main():
 
     # Resolve paths
     current_file = Path(__file__).resolve()
-    trading_root = current_file.parent.parent # Trading/
-    project_root = trading_root.parent        # Project root
+    
+    # Detect if running from Trading/util/ or common/
+    if (current_file.parent.parent / "AI").exists():
+        project_root = current_file.parent.parent
+    else:
+        project_root = current_file.parent.parent.parent
+        
+    trading_root = project_root / "Trading"
     
     run_session_script = project_root / "AI" / "util" / "run_session.py"
     ai_dir = project_root / "AI"
     execute_session_script = trading_root / "stock_trading" / "execute_session.py"
-    market_open_script = trading_root / "Trading" / "market_open.py"
+    market_open_script = trading_root / "market_open.py"
     
     if not run_session_script.exists():
         print(f"Error: Could not find {run_session_script}", file=sys.stderr)
