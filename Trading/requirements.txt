@@ -9,3 +9,6 @@ boto3
 requests
 alpaca-py
 pytz
+google-genai>=0.2.0
+google-auth>=2.23.0
+google
