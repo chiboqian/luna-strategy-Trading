@@ -93,33 +93,43 @@ rules:
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # STOP-LOSS: Z-Score Blowout (Long Side)
-  # If z-score continues to extreme, cut losses
+  # STOP-LOSS: Momentum Reversal (Long QQQ Position)
+  # If we're Long QQQ (entered at Z > 1.5) and momentum reverses, cut losses
+  # Z dropping below 0 means QQQ is now underperforming SPY
   # ----------------------------------------------------------------------------
-  - name: "Pair Stop: Z-Score Blowout Long"
-    asset_class: "stock"
-    symbol: "QQQ"
-    trigger: "bar"
-    conditions:
-      - field: "z_score_ratio_QQQ_SPY_20"
-        operator: ">"
-        value: 3.5
-    action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
-    cooldown: 3600
-
-  # ----------------------------------------------------------------------------
-  # STOP-LOSS: Z-Score Blowout (Short Side)
-  # If z-score continues to extreme, cut losses
-  # ----------------------------------------------------------------------------
-  - name: "Pair Stop: Z-Score Blowout Short"
+  - name: "Pair Stop: Long QQQ Momentum Reversal"
     asset_class: "stock"
     symbol: "QQQ"
     trigger: "bar"
     conditions:
       - field: "z_score_ratio_QQQ_SPY_20"
         operator: "<"
-        value: -3.5
+        value: -0.5
+      # Only if we have QQQ position (from Long QQQ/Short SPY trade)
+      - field: "position_qty"
+        operator: ">"
+        value: 0
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
+    cooldown: 3600
+
+  # ----------------------------------------------------------------------------
+  # STOP-LOSS: Momentum Reversal (Short QQQ Position via PSQ)
+  # If we're Short QQQ via PSQ (entered at Z < -1.5) and momentum reverses, cut losses
+  # Z rising above 0 means QQQ is now outperforming SPY
+  # ----------------------------------------------------------------------------
+  - name: "Pair Stop: Short QQQ Momentum Reversal"
+    asset_class: "stock"
+    symbol: "PSQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_QQQ_SPY_20"
+        operator: ">"
+        value: 0.5
+      # Only if we have PSQ position (from Short QQQ/Long SPY trade)
+      - field: "position_qty"
+        operator: ">"
+        value: 0
     action:
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
     cooldown: 3600
