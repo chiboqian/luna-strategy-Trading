@@ -17,6 +17,9 @@ def parse_args():
     parser.add_argument("symbol", nargs="?", help="Stock symbol to cancel orders for (e.g., AAPL)")
     parser.add_argument("--all", action="store_true", help="Cancel ALL open orders for all symbols")
     parser.add_argument(
+        "--dry-run", action="store_true", help="Simulate cancellation without executing"
+    )
+    parser.add_argument(
         "-v", "--verbose",
         action="store_true",
         help="Print detailed information for each canceled order"
@@ -59,6 +62,12 @@ def main():
                 print(f"ℹ️ No orders to cancel (Skipped {skipped_count} orders for symbols with open positions)")
                 sys.exit(0)
             
+            if args.dry_run:
+                print(f"ℹ️ [DRY RUN] Would cancel {len(to_cancel)} orders (Skipping {skipped_count} with open positions):")
+                for order in to_cancel:
+                    print(f"   [DRY RUN] Would cancel {order['symbol']} order {order['id']}")
+                sys.exit(0)
+            
             print(f"Canceling {len(to_cancel)} orders (Skipping {skipped_count} with open positions)...")
             
             success_count = 0
@@ -82,6 +91,23 @@ def main():
     if symbol in position_symbols:
         print(f"⚠️ Skipping cancellation for {symbol}: Open position exists.")
         sys.exit(0)
+
+    if args.dry_run:
+        try:
+            orders = client.get_orders(status='open', symbols=[symbol])
+            symbol_orders = [o for o in orders if o.get('symbol', '').upper() == symbol]
+            
+            if not symbol_orders:
+                print(f"ℹ️ [DRY RUN] No open orders found for {symbol}")
+                sys.exit(0)
+                
+            print(f"ℹ️ [DRY RUN] Would cancel {len(symbol_orders)} order(s) for {symbol}:")
+            for order in symbol_orders:
+                print(f"   [DRY RUN] Would cancel Order {order['id']}")
+            sys.exit(0)
+        except Exception as e:
+            print(f"❌ Error fetching orders: {e}", file=sys.stderr)
+            sys.exit(1)
 
     # Cancel all orders for the symbol
     try:
