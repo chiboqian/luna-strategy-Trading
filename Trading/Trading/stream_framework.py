@@ -366,6 +366,11 @@ class StreamFramework:
     def _apply_config_rules(self):
         """Parses config and updates subscriptions."""
         rules = self.config.get('rules', [])
+        
+        # Print loaded strategy names
+        strategy_names = [r.get('name', 'unnamed') for r in rules]
+        print(f"Loaded strategies: {', '.join(strategy_names)}")
+
         stock_symbols = set()
         stock_bar_symbols = set()
         option_symbols = set()
