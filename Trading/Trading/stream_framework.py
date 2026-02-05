@@ -537,6 +537,13 @@ class StreamFramework:
                     return self._calculate_rsi(data.symbol, period)
                 except (IndexError, ValueError):
                     return None
+            elif field.startswith('rvol_'):
+                # Format: rvol_20 (Relative Volume vs SMA_20 volume)
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_rvol(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
             else:
                 return getattr(data, field, None)
         else:
@@ -668,6 +675,29 @@ class StreamFramework:
             
         rs = avg_gain / avg_loss
         return 100.0 - (100.0 / (1.0 + rs))
+
+    def _calculate_rvol(self, symbol: str, period: int) -> Optional[float]:
+        # RVOL = Current Volume / Average Volume (SMA)
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        
+        # History items are [close, volume]
+        # Current volume is the last item
+        current_vol = history[-1][1]
+        
+        # Calculate average volume of PREVIOUS 'period' bars (excluding current to compare against baseline)
+        # OR include current? Standard definition usually compares current bar against historical average.
+        # Let's use the average of the last 'period' bars including current, or strict previous?
+        # Traders usually compare "Current Bar Vol" vs "Avg Vol of last N bars".
+        
+        volumes = [x[1] for x in list(history)[-period:]]
+        avg_vol = sum(volumes) / period
+        
+        if avg_vol == 0:
+            return 0.0
+            
+        return current_vol / avg_vol
 
     async def _trigger_action(self, rule: Dict, data: Any):
         rule_name = rule.get('name', 'unnamed_rule')

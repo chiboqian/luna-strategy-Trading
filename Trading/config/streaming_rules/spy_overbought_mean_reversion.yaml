@@ -10,6 +10,9 @@ rules:
   - field: z_score_vwap_20
     operator: '>'
     value: 2.5
+  - field: rvol_20
+    operator: '>'
+    value: 1.5
   action:
     command: python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct
       0.5 --take-profit-pct 1.0
