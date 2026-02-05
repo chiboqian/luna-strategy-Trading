@@ -2,11 +2,15 @@
 # Uses 1x Inverse ETFs to avoid short selling borrowing costs.
 # - PSQ = Short QQQ
 # - SH  = Short SPY
+#
+# IMPORTANT: Run close_old_positions.py with --symbols QQQ,SH,SPY,PSQ --days 5
+# to prevent inverse ETF decay from eroding returns on multi-day holds.
+# Example cron: 0 15 * * * python ./Trading/stock_trading/close_old_positions.py --days 5 --symbols QQQ,SH,SPY,PSQ
 
 rules:
   # ----------------------------------------------------------------------------
   # PAIR ENTRY: LONG TECH / SHORT MARKET
-  # Logic: QQQ is Strong relative to SPY.
+  # Logic: QQQ is Strong relative to SPY (ratio divergence).
   # Trade: Long QQQ + Long SH (Short SPY proxy)
   # ----------------------------------------------------------------------------
   - name: "Pair Entry: Long QQQ / Short SPY (via SH)"
@@ -14,17 +18,18 @@ rules:
     symbol: "QQQ" 
     trigger: "bar"
     conditions:
-      - field: "z_score_vwap_20"
+      - field: "z_score_ratio_QQQ_SPY_20"
         operator: ">"
         value: 1.5
     action:
       # We buy QQQ and SH (Short SPY). Capital split 50/50.
-      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --capital 10000 --action open --type long-long"
+      # --check-position prevents stacking if already in a trade
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --capital 10000 --action open --type long-long --check-position"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
   # PAIR ENTRY: SHORT TECH / LONG MARKET
-  # Logic: QQQ is Weak relative to SPY.
+  # Logic: QQQ is Weak relative to SPY (ratio divergence).
   # Trade: Long PSQ (Short QQQ proxy) + Long SPY
   # ----------------------------------------------------------------------------
   - name: "Pair Entry: Short QQQ (via PSQ) / Long SPY"
@@ -32,29 +37,81 @@ rules:
     symbol: "QQQ"
     trigger: "bar"
     conditions:
-      - field: "z_score_vwap_20"
+      - field: "z_score_ratio_QQQ_SPY_20"
         operator: "<"
         value: -1.5
     action:
       # We buy PSQ (Short QQQ) and SPY. Capital split 50/50.
-      command: "python ./Trading/alpaca_pairs_cli.py --long SPY --short PSQ --capital 10000 --action open --type long-long"
+      # --check-position prevents stacking if already in a trade
+      command: "python ./Trading/alpaca_pairs_cli.py --long SPY --short PSQ --capital 10000 --action open --type long-long --check-position"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # PAIR EXIT: NORMALIZE
+  # PAIR EXIT: NORMALIZE (QQQ Trigger)
   # ----------------------------------------------------------------------------
-  - name: "Pair Exit: QQQ/SPY Normalize"
+  - name: "Pair Exit: QQQ/SPY Normalize (QQQ Trigger)"
     asset_class: "stock"
     symbol: "QQQ"
     trigger: "bar"
     conditions:
-      - field: "z_score_vwap_20"
+      - field: "z_score_ratio_QQQ_SPY_20"
         operator: "<"
         value: 0.5
-      - field: "z_score_vwap_20"
+      - field: "z_score_ratio_QQQ_SPY_20"
         operator: ">"
         value: -0.5
     action:
       # Close ALL positions related to this pair
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
+    cooldown: 3600
+
+  # ----------------------------------------------------------------------------
+  # PAIR EXIT: NORMALIZE (SPY Trigger) - Redundant exit for robustness
+  # ----------------------------------------------------------------------------
+  - name: "Pair Exit: QQQ/SPY Normalize (SPY Trigger)"
+    asset_class: "stock"
+    symbol: "SPY"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_QQQ_SPY_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_ratio_QQQ_SPY_20"
+        operator: ">"
+        value: -0.5
+    action:
+      # Close ALL positions related to this pair
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
+    cooldown: 3600
+
+  # ----------------------------------------------------------------------------
+  # STOP-LOSS: Z-Score Blowout (Long Side)
+  # If z-score continues to extreme, cut losses
+  # ----------------------------------------------------------------------------
+  - name: "Pair Stop: Z-Score Blowout Long"
+    asset_class: "stock"
+    symbol: "QQQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_QQQ_SPY_20"
+        operator: ">"
+        value: 3.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
+    cooldown: 3600
+
+  # ----------------------------------------------------------------------------
+  # STOP-LOSS: Z-Score Blowout (Short Side)
+  # If z-score continues to extreme, cut losses
+  # ----------------------------------------------------------------------------
+  - name: "Pair Stop: Z-Score Blowout Short"
+    asset_class: "stock"
+    symbol: "QQQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_QQQ_SPY_20"
+        operator: "<"
+        value: -3.5
+    action:
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
     cooldown: 3600
