@@ -536,6 +536,18 @@ class StreamFramework:
                     return self._calculate_z_score_sma(data.symbol, period)
                 except (IndexError, ValueError):
                     return None
+            elif field.startswith('z_score_ratio_'):
+                # Format: z_score_ratio_SYM1_SYM2_20 (Z-Score of SYM1/SYM2 ratio)
+                # Example: z_score_ratio_QQQ_SPY_20
+                try:
+                    parts = field.split('_')  # ['z', 'score', 'ratio', 'QQQ', 'SPY', '20']
+                    sym1 = parts[3].upper()
+                    sym2 = parts[4].upper()
+                    period = int(parts[5])
+                    return self._calculate_z_score_ratio(sym1, sym2, period)
+                except (IndexError, ValueError) as e:
+                    logger.warning(f"Invalid z_score_ratio field format: {field} - {e}")
+                    return None
             elif field.startswith('rsi_'):
                 # Format: rsi_14
                 try:
@@ -704,6 +716,60 @@ class StreamFramework:
             return 0.0
             
         return current_vol / avg_vol
+
+    def _calculate_z_score_ratio(self, sym1: str, sym2: str, period: int) -> Optional[float]:
+        """
+        Calculate Z-Score of the price ratio between two symbols.
+        Z = (Current_Ratio - Mean_Ratio) / StdDev_Ratio
+        
+        This is used for pairs trading to identify mean-reversion opportunities
+        when one asset diverges significantly from another.
+        """
+        history1 = self.bar_history.get(sym1)
+        history2 = self.bar_history.get(sym2)
+        
+        if not history1 or not history2:
+            return None
+        if len(history1) < period or len(history2) < period:
+            return None
+        
+        # Get last 'period' closes for each symbol
+        closes1 = [x[0] for x in list(history1)[-period:]]
+        closes2 = [x[0] for x in list(history2)[-period:]]
+        
+        # Ensure we have matching lengths (use minimum)
+        min_len = min(len(closes1), len(closes2))
+        if min_len < period:
+            return None
+        
+        closes1 = closes1[-min_len:]
+        closes2 = closes2[-min_len:]
+        
+        # Calculate ratio series (sym1 / sym2)
+        ratios = []
+        for c1, c2 in zip(closes1, closes2):
+            if c2 > 0:
+                ratios.append(c1 / c2)
+            else:
+                return None
+        
+        if len(ratios) < period:
+            return None
+        
+        # Current ratio is the last value
+        current_ratio = ratios[-1]
+        
+        # Calculate mean and stddev of ratio series
+        mean_ratio = sum(ratios) / len(ratios)
+        variance = sum((r - mean_ratio) ** 2 for r in ratios) / len(ratios)
+        stddev = math.sqrt(variance)
+        
+        if stddev == 0:
+            return 0.0
+        
+        z_score = (current_ratio - mean_ratio) / stddev
+        logger.debug(f"Z-Score Ratio {sym1}/{sym2}: {z_score:.3f} (ratio={current_ratio:.4f}, mean={mean_ratio:.4f}, std={stddev:.4f})")
+        return z_score
 
     async def _trigger_action(self, rule: Dict, data: Any):
         rule_name = rule.get('name', 'unnamed_rule')

@@ -51,6 +51,7 @@ def parse_args():
     parser.add_argument("--action", choices=['open', 'close', 'close-all'], default='open', help="Action to take")
     parser.add_argument("--type", choices=['standard', 'long-long'], default='standard', help="Standard (L/S) or Long-Long (L/L) for inverse ETFs")
     parser.add_argument("--feed", default=config['default_feed'], help="Data feed (iex/sip)")
+    parser.add_argument("--check-position", action="store_true", help="Skip if any pair symbol already has open position")
     parser.add_argument("--dry-run", action="store_true", help="Simulate only")
     parser.add_argument("--log-dir", help="Log directory")
     parser.add_argument("--log-file", help="Log file")
@@ -85,6 +86,31 @@ def main():
         
         sym1 = args.long.upper()
         sym2 = args.short.upper()
+        
+        # Check for existing positions if --check-position is set
+        if args.check_position:
+            # Collect all symbols that would be part of this pair trade
+            pair_symbols = {sym1, sym2}
+            if args.long2:
+                pair_symbols.add(args.long2.upper())
+            if args.short2:
+                pair_symbols.add(args.short2.upper())
+            # Also check inverse ETF counterparts for QQQ/SPY trades
+            inverse_map = {'QQQ': 'PSQ', 'SPY': 'SH', 'PSQ': 'QQQ', 'SH': 'SPY'}
+            for sym in list(pair_symbols):
+                if sym in inverse_map:
+                    pair_symbols.add(inverse_map[sym])
+            
+            try:
+                positions = client.get_all_positions() or []
+                open_syms = {p.get('symbol', '').upper() for p in positions}
+                overlap = pair_symbols & open_syms
+                if overlap:
+                    logger.warning(f"⚠️ SKIPPING: Already have open position(s) in: {overlap}")
+                    sys.exit(0)
+            except Exception as e:
+                logger.error(f"Failed to check positions: {e}")
+                # Continue anyway - better to trade than miss opportunity
         
         type_desc = "Long/Short" if args.type == 'standard' else "Long/Long (Inverse ETF)"
         logger.info(f"🔵 OPENING PAIR [{type_desc}]: {sym1} / {sym2} | Capital: ${args.capital}")
