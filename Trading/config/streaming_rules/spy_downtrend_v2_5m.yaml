@@ -1,0 +1,22 @@
+rules:
+- name: SPY Downtrend (Aggressive 5m)
+  symbol: SPY
+  asset_class: stock
+  trigger: bar
+  timeframe: 5Min
+  conditions:
+  - field: close
+    operator: <
+    value: ema_20
+  - field: ema_20
+    operator: <
+    value: ema_50
+  - field: rsi_14
+    operator: <
+    value: 50.0
+  - field: adx_14
+    operator: '>'
+    value: 25.0
+  action:
+    command: python ./Trading/alpaca_buy_cli.py spxu 5000 --mid-price --stop-loss-pct 2.0 --take-profit-pct 4.0
+  cooldown: 900
