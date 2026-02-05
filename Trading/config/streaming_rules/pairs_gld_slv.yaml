@@ -96,3 +96,50 @@ rules:
     action:
       command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close-all"
     cooldown: 3600
+
+  # ============================================================================
+  # SLV-TRIGGERED RULES (Required to subscribe to SLV bars for ratio calculation)
+  # ============================================================================
+  
+  # Entry triggered by SLV bar (same logic as GLD trigger)
+  - name: "Pair Entry: Short GLD / Long SLV (SLV Trigger)"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_GLD_SLV_20"
+        operator: ">"
+        value: 2.0
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --capital 10000 --action open --check-position"
+    cooldown: 7200
+
+  - name: "Pair Entry: Long GLD / Short SLV (SLV Trigger)"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_GLD_SLV_20"
+        operator: "<"
+        value: -2.0
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --capital 10000 --action open --check-position"
+    cooldown: 7200
+
+  - name: "Pair Exit: GLD/SLV Normalize (SLV Trigger)"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_ratio_GLD_SLV_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_ratio_GLD_SLV_20"
+        operator: ">"
+        value: -0.5
+      - field: "position_qty"
+        operator: "abs>"
+        value: 0
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close-all"
+    cooldown: 3600
