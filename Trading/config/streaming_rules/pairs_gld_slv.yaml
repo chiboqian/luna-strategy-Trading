@@ -1,44 +1,51 @@
 # Pairs Trading: GLD (Gold) vs SLV (Silver)
-# The "Gold/Silver Ratio" Trade - MEAN REVERSION strategy.
-# When ratio diverges significantly, bet on return to mean.
+# The "Gold/Silver Ratio" Trade (Mean Reversion).
+#
+# STRATEGY:
+# - If GLD is expensive vs SLV (Ratio Z > 2.0) -> Short GLD / Long SLV.
+# - If GLD is cheap vs SLV (Ratio Z < -2.0) -> Long GLD / Short SLV.
+#
+# NOTE: We use Standard Short Selling here (no liquid Inverse ETFs).
 
 rules:
   # ----------------------------------------------------------------------------
-  # PAIR ENTRY: LONG SLV / SHORT GLD (Gold is expensive relative to Silver)
-  # Mean reversion: Short the expensive, Long the cheap
+  # SCENARIO: GOLD IS EXPENSIVE (Ratio Z > 2.0)
+  # Trade: Short GLD / Long SLV
   # ----------------------------------------------------------------------------
-  - name: "Pair Entry: Long SLV / Short GLD"
+  - name: "Pair Entry: Short GLD / Long SLV"
     asset_class: "stock"
-    symbol: "GLD"
+    symbol: "GLD" # Trigger on GLD
     trigger: "bar"
     conditions:
       - field: "z_score_ratio_GLD_SLV_20"
         operator: ">"
         value: 2.0
     action:
+      # Short GLD, Long SLV.
       command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --capital 10000 --action open --check-position"
     cooldown: 7200
 
   # ----------------------------------------------------------------------------
-  # PAIR ENTRY: LONG GLD / SHORT SLV (Silver is expensive relative to Gold)
-  # Mean reversion: Short the expensive, Long the cheap
+  # SCENARIO: GOLD IS CHEAP (Ratio Z < -2.0)
+  # Trade: Long GLD / Short SLV
   # ----------------------------------------------------------------------------
   - name: "Pair Entry: Long GLD / Short SLV"
     asset_class: "stock"
-    symbol: "SLV"
+    symbol: "GLD"
     trigger: "bar"
     conditions:
       - field: "z_score_ratio_GLD_SLV_20"
         operator: "<"
         value: -2.0
     action:
+      # Long GLD, Short SLV.
       command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --capital 10000 --action open --check-position"
     cooldown: 7200
 
   # ----------------------------------------------------------------------------
-  # PAIR EXIT: CLOSE ALL (Watch both symbols for normalization)
+  # PAIR EXIT: NORMALIZE
   # ----------------------------------------------------------------------------
-  - name: "Pair Exit: GLD/SLV Normalize (GLD Trigger)"
+  - name: "Pair Exit: GLD/SLV Normalize"
     asset_class: "stock"
     symbol: "GLD"
     trigger: "bar"
@@ -49,69 +56,43 @@ rules:
       - field: "z_score_ratio_GLD_SLV_20"
         operator: ">"
         value: -0.5
-      # Only trigger exit if we actually have a position
+      # Only exit if we have a position
       - field: "position_qty"
         operator: "abs>"
         value: 0
     action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --long2 GLD --short2 SLV --action close-all"
-    cooldown: 3600
-
-  - name: "Pair Exit: GLD/SLV Normalize (SLV Trigger)"
-    asset_class: "stock"
-    symbol: "SLV"
-    trigger: "bar"
-    conditions:
-      - field: "z_score_ratio_GLD_SLV_20"
-        operator: "<"
-        value: 0.5
-      - field: "z_score_ratio_GLD_SLV_20"
-        operator: ">"
-        value: -0.5
-      # Only trigger exit if we actually have a position
-      - field: "position_qty"
-        operator: "abs>"
-        value: 0
-    action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --long2 GLD --short2 SLV --action close-all"
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close-all"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # STOP-LOSS: Z-Score Blowout (Long SLV / Short GLD position)
-  # If entered at Z > 2.0 and Z keeps rising, trade is LOSING
+  # STOP LOSS: BLOWOUT
   # ----------------------------------------------------------------------------
-  - name: "Pair Stop: GLD/SLV Blowout Long SLV"
+  - name: "Pair Stop: Blowout (Z > 3.5)"
     asset_class: "stock"
     symbol: "GLD"
     trigger: "bar"
     conditions:
       - field: "z_score_ratio_GLD_SLV_20"
         operator: ">"
-        value: 4.0
-      # Only if we have GLD short position
+        value: 3.5
       - field: "position_qty"
-        operator: "<"
+        operator: "abs>"
         value: 0
     action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --long2 GLD --short2 SLV --action close-all"
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close-all"
     cooldown: 3600
 
-  # ----------------------------------------------------------------------------
-  # STOP-LOSS: Z-Score Blowout (Long GLD / Short SLV position)
-  # If entered at Z < -2.0 and Z keeps falling, trade is LOSING
-  # ----------------------------------------------------------------------------
-  - name: "Pair Stop: GLD/SLV Blowout Long GLD"
+  - name: "Pair Stop: Blowout (Z < -3.5)"
     asset_class: "stock"
-    symbol: "SLV"
+    symbol: "GLD"
     trigger: "bar"
     conditions:
       - field: "z_score_ratio_GLD_SLV_20"
         operator: "<"
-        value: -4.0
-      # Only if we have SLV short position
+        value: -3.5
       - field: "position_qty"
-        operator: "<"
+        operator: "abs>"
         value: 0
     action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --long2 GLD --short2 SLV --action close-all"
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close-all"
     cooldown: 3600
