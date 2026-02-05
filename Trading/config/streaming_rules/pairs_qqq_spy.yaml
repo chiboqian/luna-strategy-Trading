@@ -1,19 +1,17 @@
-# Pairs Trading: QQQ vs SPY (Risk-On / Risk-Off Rotation)
-# Uses 1x Inverse ETFs to avoid short selling borrowing costs.
-# - PSQ = Short QQQ
-# - SH  = Short SPY
+# Pairs Trading: QQQ vs SPY (Mean Reversion)
+# Uses 1x Inverse ETFs.
 #
-# IMPORTANT: Run close_old_positions.py with --symbols QQQ,SH,SPY,PSQ --days 5
-# to prevent inverse ETF decay from eroding returns on multi-day holds.
-# Example cron: 0 15 * * * python ./Trading/stock_trading/close_old_positions.py --days 5 --symbols QQQ,SH,SPY,PSQ
+# STRATEGY: MEAN REVERSION
+# - When QQQ is expensive (Z > 1.5), we Short QQQ (Buy PSQ) and Long SPY.
+# - When QQQ is cheap (Z < -1.5), we Long QQQ and Short SPY (Buy SH).
 
 rules:
   # ----------------------------------------------------------------------------
-  # PAIR ENTRY: LONG TECH / SHORT MARKET
-  # Logic: QQQ is Strong relative to SPY (ratio divergence).
-  # Trade: Long QQQ + Long SH (Short SPY proxy)
+  # SCENARIO: QQQ IS EXPENSIVE (Z > 1.5)
+  # Trade: Short QQQ (Buy PSQ) / Long SPY
+  # Bet: Spread narrows (Z goes down to 0)
   # ----------------------------------------------------------------------------
-  - name: "Pair Entry: Long QQQ / Short SPY (via SH)"
+  - name: "Pair Entry: Short QQQ (via PSQ) / Long SPY"
     asset_class: "stock"
     symbol: "QQQ" 
     trigger: "bar"
@@ -22,17 +20,16 @@ rules:
         operator: ">"
         value: 1.5
     action:
-      # We buy QQQ and SH (Short SPY). Capital split 50/50.
-      # --check-position prevents stacking if already in a trade
-      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --capital 10000 --action open --type long-long --check-position"
+      # Buy PSQ (Short QQQ) and SPY
+      command: "python ./Trading/alpaca_pairs_cli.py --long SPY --short PSQ --capital 10000 --action open --type long-long --check-position"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # PAIR ENTRY: SHORT TECH / LONG MARKET
-  # Logic: QQQ is Weak relative to SPY (ratio divergence).
-  # Trade: Long PSQ (Short QQQ proxy) + Long SPY
+  # SCENARIO: QQQ IS CHEAP (Z < -1.5)
+  # Trade: Long QQQ / Short SPY (Buy SH)
+  # Bet: Spread widens (Z goes up to 0)
   # ----------------------------------------------------------------------------
-  - name: "Pair Entry: Short QQQ (via PSQ) / Long SPY"
+  - name: "Pair Entry: Long QQQ / Short SPY (via SH)"
     asset_class: "stock"
     symbol: "QQQ"
     trigger: "bar"
@@ -41,94 +38,63 @@ rules:
         operator: "<"
         value: -1.5
     action:
-      # We buy PSQ (Short QQQ) and SPY. Capital split 50/50.
-      # --check-position prevents stacking if already in a trade
-      command: "python ./Trading/alpaca_pairs_cli.py --long SPY --short PSQ --capital 10000 --action open --type long-long --check-position"
+      # Buy QQQ and SH (Short SPY)
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --capital 10000 --action open --type long-long --check-position"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # PAIR EXIT: NORMALIZE (QQQ Trigger)
+  # PAIR EXIT: NORMALIZE (Take Profit)
   # ----------------------------------------------------------------------------
-  - name: "Pair Exit: QQQ/SPY Normalize (QQQ Trigger)"
+  - name: "Pair Exit: Normalize"
     asset_class: "stock"
     symbol: "QQQ"
     trigger: "bar"
     conditions:
+      # Spread has returned to normal range [-0.5, 0.5]
       - field: "z_score_ratio_QQQ_SPY_20"
         operator: "<"
         value: 0.5
       - field: "z_score_ratio_QQQ_SPY_20"
         operator: ">"
         value: -0.5
-      # Only trigger exit if we actually have a position
+      # Only execute if we have positions to close
       - field: "position_qty"
         operator: "abs>"
         value: 0
     action:
-      # Close ALL positions related to this pair
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # PAIR EXIT: NORMALIZE (SPY Trigger) - Redundant exit for robustness
+  # STOP LOSS: BLOWOUT (Spread keeps widening against us)
   # ----------------------------------------------------------------------------
-  - name: "Pair Exit: QQQ/SPY Normalize (SPY Trigger)"
-    asset_class: "stock"
-    symbol: "SPY"
-    trigger: "bar"
-    conditions:
-      - field: "z_score_ratio_QQQ_SPY_20"
-        operator: "<"
-        value: 0.5
-      - field: "z_score_ratio_QQQ_SPY_20"
-        operator: ">"
-        value: -0.5
-      # Only trigger exit if we actually have a position
-      - field: "position_qty"
-        operator: "abs>"
-        value: 0
-    action:
-      # Close ALL positions related to this pair
-      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
-    cooldown: 3600
-
-  # ----------------------------------------------------------------------------
-  # STOP-LOSS: Momentum Reversal (Long QQQ Position)
-  # If we're Long QQQ (entered at Z > 1.5) and momentum reverses, cut losses
-  # Z dropping below 0 means QQQ is now underperforming SPY
-  # ----------------------------------------------------------------------------
-  - name: "Pair Stop: Long QQQ Momentum Reversal"
+  - name: "Pair Stop: Blowout (Z > 3.0)"
     asset_class: "stock"
     symbol: "QQQ"
     trigger: "bar"
     conditions:
+      # We Shorted QQQ at 1.5, but it went to 3.0. Pain.
       - field: "z_score_ratio_QQQ_SPY_20"
-        operator: "<"
-        value: -0.5
-      # Only if we have QQQ position (from Long QQQ/Short SPY trade)
-      - field: "position_qty"
         operator: ">"
+        value: 3.0
+      - field: "position_qty"
+        operator: "abs>"
         value: 0
     action:
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
     cooldown: 3600
 
-  # ----------------------------------------------------------------------------
-  # STOP-LOSS: Momentum Reversal (Short QQQ Position via PSQ)
-  # If we're Short QQQ via PSQ (entered at Z < -1.5) and momentum reverses, cut losses
-  # Z rising above 0 means QQQ is now outperforming SPY
-  # ----------------------------------------------------------------------------
-  - name: "Pair Stop: Short QQQ Momentum Reversal"
+  - name: "Pair Stop: Blowout (Z < -3.0)"
     asset_class: "stock"
-    symbol: "PSQ"
+    symbol: "QQQ"
     trigger: "bar"
     conditions:
+      # We Longed QQQ at -1.5, but it went to -3.0. Pain.
       - field: "z_score_ratio_QQQ_SPY_20"
-        operator: ">"
-        value: 0.5
-      # Only if we have PSQ position (from Short QQQ/Long SPY trade)
+        operator: "<"
+        value: -3.0
       - field: "position_qty"
-        operator: ">"
+        operator: "abs>"
         value: 0
     action:
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
