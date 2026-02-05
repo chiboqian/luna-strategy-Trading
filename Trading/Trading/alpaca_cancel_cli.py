@@ -14,7 +14,8 @@ def parse_args():
         description="Cancel all open orders for a stock symbol (Alpaca)",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("symbol", help="Stock symbol to cancel orders for (e.g., AAPL)")
+    parser.add_argument("symbol", nargs="?", help="Stock symbol to cancel orders for (e.g., AAPL)")
+    parser.add_argument("--all", action="store_true", help="Cancel ALL open orders for all symbols")
     parser.add_argument(
         "-v", "--verbose",
         action="store_true",
@@ -25,7 +26,10 @@ def parse_args():
 
 def main():
     args = parse_args()
-    symbol = args.symbol.upper()
+
+    if not args.symbol and not args.all:
+        print("Error: Must specify a symbol or --all", file=sys.stderr)
+        sys.exit(1)
 
     # Initialize client
     try:
@@ -33,6 +37,51 @@ def main():
     except Exception as e:
         print(f"❌ Failed to initialize Alpaca client: {e}", file=sys.stderr)
         sys.exit(1)
+
+    # Fetch positions to filter orders
+    try:
+        positions = client.get_all_positions()
+        position_symbols = {p['symbol'] for p in positions}
+    except Exception as e:
+        print(f"❌ Failed to fetch positions: {e}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.all:
+        try:
+            # Fetch all open orders (limit 500 to catch most)
+            orders = client.get_orders(status='open', limit=500)
+            
+            # Filter out orders for symbols where we have a position
+            to_cancel = [o for o in orders if o['symbol'] not in position_symbols]
+            skipped_count = len(orders) - len(to_cancel)
+            
+            if not to_cancel:
+                print(f"ℹ️ No orders to cancel (Skipped {skipped_count} orders for symbols with open positions)")
+                sys.exit(0)
+            
+            print(f"Canceling {len(to_cancel)} orders (Skipping {skipped_count} with open positions)...")
+            
+            success_count = 0
+            for order in to_cancel:
+                try:
+                    client.cancel_order_by_id(order['id'])
+                    success_count += 1
+                    if args.verbose:
+                        print(f"   ✓ Canceled {order['symbol']} order {order['id']}")
+                except Exception as e:
+                    print(f"   ❌ Failed to cancel {order['symbol']} order {order['id']}: {e}", file=sys.stderr)
+            
+            print(f"✅ Canceled {success_count} orders")
+            sys.exit(0)
+        except Exception as e:
+            print(f"❌ Error canceling all orders: {e}", file=sys.stderr)
+            sys.exit(1)
+
+    symbol = args.symbol.upper()
+    
+    if symbol in position_symbols:
+        print(f"⚠️ Skipping cancellation for {symbol}: Open position exists.")
+        sys.exit(0)
 
     # Cancel all orders for the symbol
     try:

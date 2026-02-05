@@ -125,6 +125,12 @@ def parse_args():
         action="store_true",
         help="Simulate order without executing"
     )
+    parser.add_argument(
+        "--tif",
+        default="gtc",
+        choices=["day", "gtc", "opg", "cls", "ioc", "fok"],
+        help="Time in force (default: gtc)"
+    )
     parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/cli)")
     parser.add_argument("--log-file", help="Log file name (default: alpaca_short_sell.log)")
     return parser.parse_args()
@@ -388,7 +394,7 @@ def main():
             quantity=qty,
             order_type=order_type,
             limit_price=limit_price,
-            time_in_force="day",
+            time_in_force=args.tif,
             extended_hours=False,
             order_class="bracket",
             stop_loss_price=stop_loss_price,
