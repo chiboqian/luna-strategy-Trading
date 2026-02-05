@@ -14,6 +14,7 @@ import argparse
 import sys
 import json
 import os
+import concurrent.futures
 import requests
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -231,6 +232,22 @@ def find_position_start_from_orders(client: AlpacaClient, symbol: str) -> Option
     start_time = items[start_idx][0]
     return start_time
 
+def check_position_age(client, pos, days_threshold, now):
+    """Helper to check a single position's age."""
+    symbol = pos.get('symbol')
+    if not symbol:
+        return None
+    # Determine holding start from order history
+    start_dt = find_position_start_from_orders(client, symbol)
+    if not start_dt:
+        return None
+    biz_age = business_days_between(start_dt, now)
+    if biz_age >= days_threshold:
+        pos = dict(pos)
+        pos['_holding_start'] = start_dt.isoformat()
+        pos['_business_days_age'] = biz_age
+        return (pos, biz_age)
+    return None
 
 def main():
     parser = argparse.ArgumentParser(
@@ -322,22 +339,20 @@ def main():
         now = datetime.now(timezone.utc)
 
         to_close = []
-        for pos in positions:
-            symbol = pos.get('symbol')
-            if not symbol:
-                continue
-            # Determine holding start from order history
-            start_dt = find_position_start_from_orders(client, symbol)
-            if not start_dt:
-                # Could not determine age reliably; skip
-                continue
-            biz_age = business_days_between(start_dt, now)
-            if biz_age >= args.days:
-                # Attach derived start timestamp to pos for printing
-                pos = dict(pos)
-                pos['_holding_start'] = start_dt.isoformat()
-                pos['_business_days_age'] = biz_age
-                to_close.append((pos, biz_age))
+        
+        # Use ThreadPoolExecutor to check positions in parallel
+        # This significantly speeds up the process when there are many positions
+        # as it performs API calls concurrently.
+        max_workers = min(20, len(positions)) if positions else 1
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(check_position_age, client, pos, args.days, now) for pos in positions]
+            for future in concurrent.futures.as_completed(futures):
+                try:
+                    res = future.result()
+                    if res:
+                        to_close.append(res)
+                except Exception as e:
+                    print(f"Error checking position age: {e}", file=sys.stderr)
 
     if not to_close:
         if args.json:

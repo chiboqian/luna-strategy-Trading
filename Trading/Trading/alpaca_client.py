@@ -45,11 +45,12 @@ class AlpacaClient:
         if not self.api_key or not self.api_secret:
             raise ValueError("API key and secret must be provided or set in .env file")
         
-        self.headers = {
+        self.session = requests.Session()
+        self.session.headers.update({
             'APCA-API-KEY-ID': self.api_key,
             'APCA-API-SECRET-KEY': self.api_secret,
             'Content-Type': 'application/json'
-        }
+        })
     
     def _make_request(self, method: str, endpoint: str, use_data_api: bool = False, **kwargs) -> Dict:
         """
@@ -72,7 +73,7 @@ class AlpacaClient:
         url = f"{base}{endpoint}"
         
         try:
-            response = requests.request(method, url, headers=self.headers, **kwargs)
+            response = self.session.request(method, url, **kwargs)
             response.raise_for_status()
             # Handle 204 No Content (e.g., DELETE requests)
             if response.status_code == 204 or not response.content:

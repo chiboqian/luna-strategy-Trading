@@ -78,6 +78,8 @@ class StreamFramework:
         
         # Bar history: symbol -> deque of close prices
         self.bar_history = {}
+        # Pending 5-min bars: symbol -> dict
+        self.pending_5m_bars = {}
         history_dir = Path("trading_logs/streaming")
         history_dir.mkdir(parents=True, exist_ok=True)
         today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -161,7 +163,7 @@ class StreamFramework:
                 logger.error(f"Failed to load history: {e}")
 
     def _load_daily_data(self):
-        """Loads existing bar data for the current day from CSV."""
+        """Loads existing bar data for the current day from CSV and aggregates to 5-min bars."""
         if not hasattr(self, 'stock_bar_file') or not self.stock_bar_file.exists():
             return
 
@@ -178,8 +180,11 @@ class StreamFramework:
         logger.info(f"Checking for existing daily data in {self.stock_bar_file}...")
         try:
             today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-            count = 0
+            count_5m = 0
             
+            # Reset pending to allow clean replay
+            self.pending_5m_bars = {}
+
             with open(self.stock_bar_file, 'r') as f:
                 header = f.readline()
                 for line in f:
@@ -187,21 +192,55 @@ class StreamFramework:
                     if len(parts) < 7: continue
                     
                     # timestamp,symbol,open,high,low,close,volume
-                    ts_str, symbol, o, h, l, c, v = parts
+                    ts_str, symbol, o_str, h_str, l_str, c_str, v_str = parts
                     
-                    if today_str in ts_str:
-                        if symbol not in self.bar_history:
-                            self.bar_history[symbol] = deque(maxlen=300)
+                    if today_str not in ts_str:
+                        continue
                         
+                    try:
+                        o, h, l, c = float(o_str), float(h_str), float(l_str), float(c_str)
+                        v = float(v_str)
+                        
+                        # Parse timestamp to get minute
+                        # Handle basic ISO formats
                         try:
-                            close_val = float(c)
-                            vol_val = float(v)
-                            self.bar_history[symbol].append((close_val, vol_val))
-                            count += 1
+                            dt = datetime.fromisoformat(ts_str)
                         except ValueError:
-                            continue
-            if count > 0:
-                logger.info(f"Loaded {count} bars from today's session.")
+                            # Fallback for simple space-separated
+                            dt = datetime.strptime(ts_str.split('.')[0], "%Y-%m-%d %H:%M:%S")
+
+                        minute = dt.minute
+                        
+                        # Aggregation logic
+                        if symbol not in self.pending_5m_bars:
+                            self.pending_5m_bars[symbol] = {
+                                'open': o, 'high': h, 'low': l, 'close': c, 
+                                'volume': v, 'timestamp': dt, 'symbol': symbol
+                            }
+                        else:
+                            b = self.pending_5m_bars[symbol]
+                            b['high'] = max(b['high'], h)
+                            b['low'] = min(b['low'], l)
+                            b['close'] = c
+                            b['volume'] += v
+                            
+                        # Boundary check
+                        if minute % 5 == 4:
+                            if symbol not in self.bar_history:
+                                self.bar_history[symbol] = deque(maxlen=300)
+                            
+                            final = self.pending_5m_bars.pop(symbol)
+                            self.bar_history[symbol].append((final['close'], final['volume']))
+                            count_5m += 1
+                            
+                    except ValueError:
+                        continue
+                        
+            if count_5m > 0:
+                logger.info(f"Loaded {count_5m} aggregated 5-min bars from CSV.")
+                if self.pending_5m_bars:
+                     logger.info(f"Restored partial state for {len(self.pending_5m_bars)} symbols.")
+
         except Exception as e:
             logger.error(f"Failed to load daily data: {e}")
 
@@ -381,13 +420,46 @@ class StreamFramework:
     async def _handle_stock_bar(self, data: Bar):
         if not self._check_schedule():
             return
+        # Always record the raw 1-minute bar for granular data
         self._record_bar(data, self.stock_bar_fh)
-        symbol = data.symbol
-        if symbol not in self.bar_history:
-            self.bar_history[symbol] = deque(maxlen=300) # Keep last 300 bars (enough for SMA 200)
         
-        self.bar_history[symbol].append((data.close, data.volume))
-        await self._evaluate_rules(data, self.stock_rules.get(symbol, []), data_type='bar')
+        symbol = data.symbol
+        minute = data.timestamp.minute
+        
+        # 1. Update/Create pending 5-min bar
+        if symbol not in self.pending_5m_bars:
+            self.pending_5m_bars[symbol] = {
+                'open': data.open,
+                'high': data.high,
+                'low': data.low,
+                'close': data.close,
+                'volume': data.volume,
+                'timestamp': data.timestamp,
+                'symbol': symbol
+            }
+        else:
+            b = self.pending_5m_bars[symbol]
+            b['high'] = max(b['high'], data.high)
+            b['low'] = min(b['low'], data.low)
+            b['close'] = data.close
+            b['volume'] += data.volume
+            # Keep original timestamp (start of 5m window)
+        
+        # 2. Check for 5-minute boundary completion (e.g., minute 4, 9, 14...)
+        if minute % 5 == 4:
+            if symbol not in self.bar_history:
+                self.bar_history[symbol] = deque(maxlen=300) 
+            
+            final_bar_dict = self.pending_5m_bars.pop(symbol)
+            
+            # Create synthetic object for rules
+            from types import SimpleNamespace
+            final_bar = SimpleNamespace(**final_bar_dict)
+            
+            self.bar_history[symbol].append((final_bar.close, final_bar.volume))
+            
+            logger.info(f"Completed 5-min bar for {symbol}: C={final_bar.close} V={final_bar.volume}")
+            await self._evaluate_rules(final_bar, self.stock_rules.get(symbol, []), data_type='bar')
 
     async def _handle_option_quote(self, data: Quote):
         if not self._check_schedule():

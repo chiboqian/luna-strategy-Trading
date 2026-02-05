@@ -12,6 +12,7 @@ import json
 import logging
 import sys
 import yaml
+import concurrent.futures
 from pathlib import Path
 from typing import List
 
@@ -141,8 +142,9 @@ def main():
         return
 
     # Path 2: Close Specific Symbols
-    for symbol in args.symbols:
+    def close_single_symbol(symbol):
         symbol = symbol.upper()
+        symbol_results = []
         
         if args.cancel_orders:
             if not args.dry_run:
@@ -156,22 +158,34 @@ def main():
 
         if args.dry_run:
             logger.info(f"[Dry Run] Would close position: {symbol} (Qty: {args.qty}, Pct: {args.pct})")
-            results.append({"symbol": symbol, "status": "dry_run"})
-            continue
+            symbol_results.append({"symbol": symbol, "status": "dry_run"})
+            return symbol_results
 
         try:
             logger.info(f"Closing position: {symbol}...")
             response = client.close_position(symbol, qty=args.qty, percentage=args.pct)
             logger.info(f"Close order submitted for {symbol}: {response.get('id')}")
-            results.append({"symbol": symbol, "status": "submitted", "order": response})
+            symbol_results.append({"symbol": symbol, "status": "submitted", "order": response})
         except Exception as e:
             error_msg = str(e)
             if "404" in error_msg or "not found" in error_msg.lower():
                 logger.warning(f"Position not found for {symbol}")
-                results.append({"symbol": symbol, "status": "not_found"})
+                symbol_results.append({"symbol": symbol, "status": "not_found"})
             else:
                 logger.error(f"Failed to close {symbol}: {error_msg}")
-                results.append({"symbol": symbol, "status": "failed", "error": error_msg})
+                symbol_results.append({"symbol": symbol, "status": "failed", "error": error_msg})
+        return symbol_results
+
+    # Use ThreadPoolExecutor to process symbols in parallel
+    max_workers = min(20, len(args.symbols)) if args.symbols else 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = [executor.submit(close_single_symbol, sym) for sym in args.symbols]
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                res = future.result()
+                results.extend(res)
+            except Exception as exc:
+                logger.error(f"Symbol processing generated an exception: {exc}")
 
     if args.json:
         print(json.dumps(results, indent=2))
