@@ -1,26 +1,47 @@
-# Pairs Trading: SPY vs QQQ (Risk-On / Risk-Off Rotation)
-# If QQQ is significantly outperforming SPY (Z-Score > 2), we Long QQQ / Short SPY.
-# If QQQ is underperforming (Z-Score < -2), we Long SPY / Short QQQ.
-# Exit when spread normalizes (Z-Score between -0.5 and 0.5).
+# Pairs Trading: QQQ vs SPY (Risk-On / Risk-Off Rotation)
+# Uses 1x Inverse ETFs to avoid short selling borrowing costs.
+# - PSQ = Short QQQ
+# - SH  = Short SPY
 
 rules:
   # ----------------------------------------------------------------------------
-  # PAIR ENTRY: LONG QQQ / SHORT SPY (Tech Outperformance)
+  # PAIR ENTRY: LONG TECH / SHORT MARKET
+  # Logic: QQQ is Strong relative to SPY.
+  # Trade: Long QQQ + Long SH (Short SPY proxy)
   # ----------------------------------------------------------------------------
-  - name: "Pair Entry: Long QQQ / Short SPY"
+  - name: "Pair Entry: Long QQQ / Short SPY (via SH)"
     asset_class: "stock"
-    symbol: "QQQ" # Trigger on QQQ bar, but logic checks ratio
+    symbol: "QQQ" 
     trigger: "bar"
     conditions:
       - field: "z_score_vwap_20"
         operator: ">"
         value: 1.5
     action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SPY --capital 10000 --action open"
+      # We buy QQQ and SH (Short SPY). Capital split 50/50.
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --capital 10000 --action open --type long-long"
     cooldown: 3600
 
   # ----------------------------------------------------------------------------
-  # PAIR EXIT: CLOSE ALL
+  # PAIR ENTRY: SHORT TECH / LONG MARKET
+  # Logic: QQQ is Weak relative to SPY.
+  # Trade: Long PSQ (Short QQQ proxy) + Long SPY
+  # ----------------------------------------------------------------------------
+  - name: "Pair Entry: Short QQQ (via PSQ) / Long SPY"
+    asset_class: "stock"
+    symbol: "QQQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: -1.5
+    action:
+      # We buy PSQ (Short QQQ) and SPY. Capital split 50/50.
+      command: "python ./Trading/alpaca_pairs_cli.py --long SPY --short PSQ --capital 10000 --action open --type long-long"
+    cooldown: 3600
+
+  # ----------------------------------------------------------------------------
+  # PAIR EXIT: NORMALIZE
   # ----------------------------------------------------------------------------
   - name: "Pair Exit: QQQ/SPY Normalize"
     asset_class: "stock"
@@ -34,5 +55,6 @@ rules:
         operator: ">"
         value: -0.5
     action:
-      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SPY --action close"
+      # Close ALL positions related to this pair
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
     cooldown: 3600

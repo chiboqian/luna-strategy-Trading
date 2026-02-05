@@ -43,10 +43,13 @@ def load_config():
 def parse_args():
     config = load_config()
     parser = argparse.ArgumentParser(description="Execute Pairs Trade (Long A / Short B)")
-    parser.add_argument("--long", required=True, help="Symbol to LONG")
-    parser.add_argument("--short", required=True, help="Symbol to SHORT")
+    parser.add_argument("--long", required=False, help="Symbol to LONG (Leg 1)")
+    parser.add_argument("--short", required=False, help="Symbol to SHORT (Leg 1) - OR second LONG if type=long-long")
+    parser.add_argument("--long2", required=False, help="Symbol to LONG (Leg 2, optional)")
+    parser.add_argument("--short2", required=False, help="Symbol to SHORT (Leg 2, optional)")
     parser.add_argument("--capital", type=float, default=10000, help="Total capital to deploy (split 50/50)")
-    parser.add_argument("--action", choices=['open', 'close'], default='open', help="Action to take")
+    parser.add_argument("--action", choices=['open', 'close', 'close-all'], default='open', help="Action to take")
+    parser.add_argument("--type", choices=['standard', 'long-long'], default='standard', help="Standard (L/S) or Long-Long (L/L) for inverse ETFs")
     parser.add_argument("--feed", default=config['default_feed'], help="Data feed (iex/sip)")
     parser.add_argument("--dry-run", action="store_true", help="Simulate only")
     parser.add_argument("--log-dir", help="Log directory")
@@ -75,73 +78,71 @@ def main():
     
     client = AlpacaClient()
     
-    long_sym = args.long.upper()
-    short_sym = args.short.upper()
-    
     if args.action == 'open':
-        logger.info(f"🔵 OPENING PAIR: Long {long_sym} / Short {short_sym} | Capital: ${args.capital}")
+        # Determine symbols based on type
+        # In 'standard' mode: long=LONG, short=SHORT
+        # In 'long-long' mode: long=LONG, short=LONG (Inverse ETF)
+        
+        sym1 = args.long.upper()
+        sym2 = args.short.upper()
+        
+        type_desc = "Long/Short" if args.type == 'standard' else "Long/Long (Inverse ETF)"
+        logger.info(f"🔵 OPENING PAIR [{type_desc}]: {sym1} / {sym2} | Capital: ${args.capital}")
         
         # 1. Get Prices
-        price_long = get_price(client, long_sym, args.feed)
-        price_short = get_price(client, short_sym, args.feed)
+        price1 = get_price(client, sym1, args.feed)
+        price2 = get_price(client, sym2, args.feed)
         
-        if price_long <= 0 or price_short <= 0:
+        if price1 <= 0 or price2 <= 0:
             logger.error("❌ Invalid prices. Aborting.")
             sys.exit(1)
             
         # 2. Calculate Size (Neutral Dollar Amount)
         allocation = args.capital / 2
-        qty_long = int(allocation / price_long)
-        qty_short = int(allocation / price_short)
+        qty1 = int(allocation / price1)
+        qty2 = int(allocation / price2)
         
-        logger.info(f"   {long_sym}: ${price_long:.2f} x {qty_long} shares = ${price_long * qty_long:.2f}")
-        logger.info(f"   {short_sym}: ${price_short:.2f} x {qty_short} shares = ${price_short * qty_short:.2f}")
+        logger.info(f"   {sym1}: ${price1:.2f} x {qty1} shares = ${price1 * qty1:.2f}")
+        logger.info(f"   {sym2}: ${price2:.2f} x {qty2} shares = ${price2 * qty2:.2f}")
         
         if args.dry_run:
             logger.info("🔍 Dry run completed.")
             sys.exit(0)
             
-        # 3. Execute Orders (Market for speed in this context, or limit at ask/bid)
-        # Using Market for guaranteed execution of both legs simultaneously
+        # 3. Execute Orders
         try:
-            # Check for existing positions first to avoid doubling up? 
-            # (Skipped for speed, logic should handle this upstream)
-
-            order_long = client.place_stock_order(
-                symbol=long_sym, side='buy', quantity=qty_long, 
-                order_type='market', time_in_force='day'
-            )
-            logger.info(f"✅ Long Leg Placed: {order_long.get('id')}")
+            # Leg 1 is always BUY
+            client.place_stock_order(symbol=sym1, side='buy', quantity=qty1, order_type='market', time_in_force='day')
+            logger.info(f"✅ Leg 1 Placed (BUY {sym1})")
             
-            order_short = client.place_stock_order(
-                symbol=short_sym, side='sell', quantity=qty_short, 
-                order_type='market', time_in_force='day'
-            )
-            logger.info(f"✅ Short Leg Placed: {order_short.get('id')}")
+            # Leg 2 depends on type
+            side2 = 'sell' if args.type == 'standard' else 'buy'
+            client.place_stock_order(symbol=sym2, side=side2, quantity=qty2, order_type='market', time_in_force='day')
+            logger.info(f"✅ Leg 2 Placed ({side2.upper()} {sym2})")
             
         except Exception as e:
             logger.error(f"❌ Execution failed: {e}")
             sys.exit(1)
 
-    elif args.action == 'close':
-        logger.info(f"🔴 CLOSING PAIR: {long_sym}/{short_sym}")
+    elif args.action in ['close', 'close-all']:
+        symbols_to_close = []
+        if args.long: symbols_to_close.append(args.long.upper())
+        if args.short: symbols_to_close.append(args.short.upper())
+        if args.long2: symbols_to_close.append(args.long2.upper())
+        if args.short2: symbols_to_close.append(args.short2.upper())
         
-        # Close all positions for these symbols
+        logger.info(f"🔴 CLOSING POSITIONS: {symbols_to_close}")
+        
         if args.dry_run:
             logger.info("🔍 Dry run closing.")
             sys.exit(0)
             
-        try:
-            client.close_position(long_sym)
-            logger.info(f"✅ Closed {long_sym}")
-        except Exception as e:
-            logger.error(f"Failed to close {long_sym}: {e}")
-
-        try:
-            client.close_position(short_sym)
-            logger.info(f"✅ Closed {short_sym}")
-        except Exception as e:
-            logger.error(f"Failed to close {short_sym}: {e}")
+        for sym in symbols_to_close:
+            try:
+                client.close_position(sym)
+                logger.info(f"✅ Closed {sym}")
+            except Exception as e:
+                logger.error(f"Failed to close {sym}: {e}")
 
 if __name__ == "__main__":
     main()
