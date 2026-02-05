@@ -842,6 +842,8 @@ if __name__ == "__main__":
     parser.add_argument("--feed", help="Data feed for stocks (iex or sip)")
     args = parser.parse_args()
 
+    print(f"Command line arguments: {args}")
+
     # Resolve config path
     config_path = Path(args.config)
     if not config_path.exists():
@@ -858,6 +860,8 @@ if __name__ == "__main__":
             if not config_path.exists():
                  print(f"Error: Config file not found at {config_path}")
                  sys.exit(1)
+
+    print(f"Loading strategy from: {config_path}")
 
     framework = StreamFramework(str(config_path), log_dir=args.log_dir, log_file=args.log_file, data_feed=args.feed)
     
