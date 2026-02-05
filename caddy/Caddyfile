@@ -1,0 +1,15 @@
+{
+    email chiboqian@gmail.com
+}
+
+luna-strategy-desktop.luna-strategy.com {
+    # Use Cloudflare DNS challenge for SSL
+    tls {
+        dns cloudflare {env.CLOUDFLARE_API_TOKEN}
+    }
+
+    # Proxy to OpenClaw Gateway
+    # Note: host.docker.internal works on Docker Desktop (Mac/Win).
+    # On Linux, use 172.17.0.1 or run with --network host
+    reverse_proxy host.docker.internal:18789
+}
