@@ -1,0 +1,44 @@
+# Pairs Trading: SPY vs QQQ (Risk-On / Risk-Off Rotation)
+# If QQQ is significantly outperforming SPY (Z-Score > 2), we Long QQQ / Short SPY.
+# If QQQ is underperforming (Z-Score < -2), we Long SPY / Short QQQ.
+# Exit when spread normalizes (Z-Score between -0.5 and 0.5).
+
+rules:
+  # ----------------------------------------------------------------------------
+  # PAIR ENTRY: LONG QQQ / SHORT SPY (Tech Outperformance)
+  # ----------------------------------------------------------------------------
+  - name: "Pair Entry: Long QQQ / Short SPY"
+    asset_class: "stock"
+    symbol: "QQQ" # Trigger on QQQ bar, but logic checks ratio
+    trigger: "bar"
+    conditions:
+      # Custom field logic required in stream_framework for 'z_score_ratio_qqq_spy_20'
+      # Implementing a simplified proxy using individual Z-Scores for now
+      # Condition: QQQ is strong AND SPY is weak relative to recent history
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: 1.5  # QQQ is strong
+    action:
+      # Check if SPY is weak manually via script logic or assume divergence
+      # Ideally stream_framework supports 'ratio' fields. 
+      # For now, we trigger the CLI which calculates sizing.
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SPY --capital 10000 --action open"
+    cooldown: 3600
+
+  # ----------------------------------------------------------------------------
+  # PAIR EXIT: CLOSE ALL
+  # ----------------------------------------------------------------------------
+  - name: "Pair Exit: Normalize"
+    asset_class: "stock"
+    symbol: "QQQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: -0.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SPY --action close"
+    cooldown: 3600

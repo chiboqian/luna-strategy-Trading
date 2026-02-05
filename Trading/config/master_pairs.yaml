@@ -1,0 +1,103 @@
+# Master Pairs Trading Config
+# Combines multiple pair strategies into a single streaming process.
+# 
+# Pairs Included:
+# 1. SPY vs QQQ (Equity Risk-On/Off)
+# 2. GLD vs SLV (Precious Metals Beta)
+
+schedule:
+  enabled: true
+  timezone: "America/New_York"
+  run_on_weekends: false
+  windows:
+    - "09:30-15:55" # Stop 5 mins before close to avoid auction volatility
+
+data_feed: iex
+
+rules:
+  # ============================================================================
+  # PAIR 1: SPY vs QQQ
+  # ============================================================================
+  - name: "Pair Entry: Long QQQ / Short SPY"
+    asset_class: "stock"
+    symbol: "QQQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: 1.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SPY --capital 10000 --action open"
+    cooldown: 3600
+
+  - name: "Pair Exit: QQQ/SPY Normalize"
+    asset_class: "stock"
+    symbol: "QQQ"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: -0.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SPY --action close"
+    cooldown: 3600
+
+  # ============================================================================
+  # PAIR 2: GLD vs SLV
+  # ============================================================================
+  - name: "Pair Entry: Long SLV / Short GLD"
+    asset_class: "stock"
+    symbol: "GLD"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: 2.0
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --capital 10000 --action open"
+    cooldown: 7200
+
+  - name: "Pair Entry: Long GLD / Short SLV"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: 2.0
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --capital 10000 --action open"
+    cooldown: 7200
+
+  - name: "Pair Exit: GLD/SLV Normalize (GLD Trigger)"
+    asset_class: "stock"
+    symbol: "GLD"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: -0.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --action close"
+    cooldown: 3600
+
+  - name: "Pair Exit: GLD/SLV Normalize (SLV Trigger)"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: -0.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close"
+    cooldown: 3600

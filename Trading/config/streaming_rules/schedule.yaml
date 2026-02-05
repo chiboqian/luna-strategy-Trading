@@ -1,6 +1,0 @@
-schedule:
-  enabled: true
-  timezone: "America/New_York"
-  run_on_weekends: false
-  windows:
-    - "09:30-15:50"

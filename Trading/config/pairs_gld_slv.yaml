@@ -1,0 +1,77 @@
+# Pairs Trading: GLD (Gold) vs SLV (Silver)
+# The "Gold/Silver Ratio" Trade.
+# 
+# Logic:
+# 1. If GLD is ripping (Z-Score > 1.5) and we assume SLV is lagging -> Short GLD / Long SLV (Betting on Silver catch-up)
+# 2. If SLV is ripping (Z-Score > 1.5) -> Short SLV / Long GLD (Betting on Gold catch-up)
+#
+# Note: A more sophisticated version would calculate the actual Ratio (Price_GLD / Price_SLV) Z-Score.
+# This version uses independent Z-Scores as a proxy for divergence.
+
+rules:
+  # ----------------------------------------------------------------------------
+  # PAIR ENTRY: LONG SLV / SHORT GLD (Gold is expensive relative to Silver)
+  # ----------------------------------------------------------------------------
+  - name: "Pair Entry: Long SLV / Short GLD"
+    asset_class: "stock"
+    symbol: "GLD" # Trigger check on GLD data arrival
+    trigger: "bar"
+    conditions:
+      # GLD is unusually strong (Z > 2.0)
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: 2.0
+    action:
+      # Short the winner (Gold), Long the laggard (Silver)
+      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --capital 10000 --action open"
+    cooldown: 7200 # 2 hours cooldown
+
+  # ----------------------------------------------------------------------------
+  # PAIR ENTRY: LONG GLD / SHORT SLV (Silver is expensive relative to Gold)
+  # ----------------------------------------------------------------------------
+  - name: "Pair Entry: Long GLD / Short SLV"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      # SLV is unusually strong (Z > 2.0)
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: 2.0
+    action:
+      # Short the winner (Silver), Long the laggard (Gold)
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --capital 10000 --action open"
+    cooldown: 7200
+
+  # ----------------------------------------------------------------------------
+  # PAIR EXIT: CLOSE ALL
+  # ----------------------------------------------------------------------------
+  - name: "Pair Exit: Normalize (GLD)"
+    asset_class: "stock"
+    symbol: "GLD"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: -0.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long SLV --short GLD --action close"
+    cooldown: 3600
+
+  - name: "Pair Exit: Normalize (SLV)"
+    asset_class: "stock"
+    symbol: "SLV"
+    trigger: "bar"
+    conditions:
+      - field: "z_score_vwap_20"
+        operator: "<"
+        value: 0.5
+      - field: "z_score_vwap_20"
+        operator: ">"
+        value: -0.5
+    action:
+      command: "python ./Trading/alpaca_pairs_cli.py --long GLD --short SLV --action close"
+    cooldown: 3600
