@@ -60,6 +60,10 @@ rules:
       - field: "z_score_ratio_QQQ_SPY_20"
         operator: ">"
         value: -0.5
+      # Only trigger exit if we actually have a position
+      - field: "position_qty"
+        operator: "abs>"
+        value: 0
     action:
       # Close ALL positions related to this pair
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"
@@ -79,6 +83,10 @@ rules:
       - field: "z_score_ratio_QQQ_SPY_20"
         operator: ">"
         value: -0.5
+      # Only trigger exit if we actually have a position
+      - field: "position_qty"
+        operator: "abs>"
+        value: 0
     action:
       # Close ALL positions related to this pair
       command: "python ./Trading/alpaca_pairs_cli.py --long QQQ --short SH --long2 SPY --short2 PSQ --action close-all"

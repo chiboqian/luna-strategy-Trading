@@ -30,6 +30,7 @@ try:
     from alpaca.data.live.option import OptionDataStream
     from alpaca.data.models import Quote, Bar
     from alpaca.data.enums import DataFeed
+    from alpaca.trading.client import TradingClient
 except ImportError as e:
     logger.error(f"Failed to import alpaca-py: {e}")
     logger.error("alpaca-py is required. Please install it: pip install alpaca-py")
@@ -73,6 +74,7 @@ class StreamFramework:
         self.stock_stream = StockDataStream(self.api_key, self.secret_key, feed=self.data_feed)
         self.option_stream = OptionDataStream(self.api_key, self.secret_key)
         
+        self.trading_client = None
         # Rules storage: symbol -> list of rules
         self.stock_rules = {}
         self.option_rules = {}
@@ -129,6 +131,23 @@ class StreamFramework:
             fh.write(f"{data.timestamp},{data.symbol},{data.open},{data.high},{data.low},{data.close},{data.volume}\n")
         except Exception as e:
             logger.error(f"Failed to record bar: {e}")
+
+    def _get_trading_client(self):
+        if not self.trading_client:
+            # Auto-detect paper environment from API Key
+            is_paper = self.api_key.startswith('PK')
+            self.trading_client = TradingClient(self.api_key, self.secret_key, paper=is_paper)
+        return self.trading_client
+
+    async def _get_position_qty(self, symbol: str) -> float:
+        client = self._get_trading_client()
+        loop = asyncio.get_running_loop()
+        try:
+            # Run blocking API call in executor
+            pos = await loop.run_in_executor(None, lambda: client.get_open_position(symbol))
+            return float(pos.qty)
+        except Exception:
+            return 0.0
 
     def _load_history(self):
         file_to_load = self.history_file
@@ -510,10 +529,16 @@ class StreamFramework:
             if not conditions:
                 continue
 
-            if all(self._check_condition(data, cond, data_type) for cond in conditions):
+            # Check all conditions asynchronously
+            results = []
+            for cond in conditions:
+                res = await self._check_condition(data, cond, data_type)
+                results.append(res)
+
+            if all(results):
                 await self._trigger_action(rule, data)
 
-    def _get_field_value(self, data: Any, field: str, data_type: str) -> Optional[float]:
+    def _get_field_value_sync(self, data: Any, field: str, data_type: str) -> Optional[float]:
         if data_type == 'bar':
             # Handle calculated fields for bars
             if field.startswith('sma_'):
@@ -598,12 +623,17 @@ class StreamFramework:
             # Quote data
             return getattr(data, field, None)
 
-    def _check_condition(self, data: Any, condition: Dict, data_type: str) -> bool:
+    async def _get_field_value(self, data: Any, field: str, data_type: str) -> Optional[float]:
+        if field == 'position_qty':
+            return await self._get_position_qty(data.symbol)
+        return self._get_field_value_sync(data, field, data_type)
+
+    async def _check_condition(self, data: Any, condition: Dict, data_type: str) -> bool:
         field = condition.get('field')
         operator = condition.get('operator')
         raw_value = condition.get('value')
 
-        current_value = self._get_field_value(data, field, data_type)
+        current_value = await self._get_field_value(data, field, data_type)
         
         # Resolve target value (can be float or another field)
         target_value = None
@@ -611,7 +641,7 @@ class StreamFramework:
             target_value = float(raw_value)
         except (ValueError, TypeError):
             if isinstance(raw_value, str):
-                target_value = self._get_field_value(data, raw_value, data_type)
+                target_value = await self._get_field_value(data, raw_value, data_type)
         
         if current_value is None or target_value is None:
             return False
