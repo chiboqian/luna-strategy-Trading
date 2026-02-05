@@ -19,7 +19,8 @@ from logging_config import setup_logging
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    stream=sys.stdout  # Forces logging to go to stdout (PM2 .out log)
 )
 logger = logging.getLogger("StreamFramework")
 

@@ -1,0 +1,7 @@
+# Schedule configuration for the streaming framework
+schedule:
+  enabled: true
+  timezone: "America/New_York"
+  run_on_weekends: false
+  windows:
+    - "09:30-16:00"
