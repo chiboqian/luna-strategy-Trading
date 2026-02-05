@@ -13,7 +13,10 @@ rules:
   - field: rvol_20
     operator: '>'
     value: 1.5
+  - field: adx_14
+    operator: <
+    value: 30.0  # Only trade when NOT in strong trend
   action:
     command: python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct
-      0.5 --take-profit-pct 1.0
+      1.5 --take-profit-pct 3.0
   cooldown: 2700

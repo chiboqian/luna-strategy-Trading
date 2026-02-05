@@ -18,5 +18,5 @@ rules:
     operator: '>'
     value: 25.0  # Trend strength is present
   action:
-    command: python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2.0 --take-profit-pct 4.0
-  cooldown: 900 # 15 minutes
+    command: python ./Trading/alpaca_buy_cli.py sqqq 5000 --mid-price --stop-loss-pct 2.0 --take-profit-pct 4.0 --exclude-symbols TQQQ
+  cooldown: 1800 # 30 minutes (6 bars)

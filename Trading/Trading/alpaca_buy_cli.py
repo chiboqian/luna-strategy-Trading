@@ -124,6 +124,12 @@ def parse_args():
         action="store_true",
         help="Simulate order without executing"
     )
+    parser.add_argument(
+        "--exclude-symbols",
+        type=str,
+        default="",
+        help="Comma-separated list of symbols to check - skip if any have open position (e.g., SQQQ,TQQQ)"
+    )
     parser.add_argument("--log-dir", help="Directory for log files (default: trading_logs/cli)")
     parser.add_argument("--log-file", help="Log file name (default: alpaca_buy.log)")
     return parser.parse_args()
@@ -276,6 +282,24 @@ def main():
             sys.exit(0)
     except Exception as e:
         output_error(f"Error checking existing position: {e}", use_text)
+
+    # Check for conflicting positions (mutual exclusion)
+    if args.exclude_symbols:
+        exclude_list = [s.strip().upper() for s in args.exclude_symbols.split(',') if s.strip()]
+        if exclude_list:
+            try:
+                positions = client.get_all_positions() or []
+                open_syms = {p.get('symbol', '').upper() for p in positions}
+                conflicts = set(exclude_list) & open_syms
+                if conflicts:
+                    if use_text:
+                        logger.info(f"⚠️ Skipping {symbol}: conflicting position(s) in {conflicts}")
+                    else:
+                        print(json.dumps({"success": False, "error": f"Conflicting position in {conflicts}"}))
+                    sys.exit(0)
+            except Exception as e:
+                output_info(f"⚠️ Error checking exclude symbols: {e}", use_text)
+                # Continue anyway - better to trade than miss opportunity
 
     # Cancel any existing open orders for this symbol
     canceled_orders = []

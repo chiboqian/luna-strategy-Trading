@@ -18,5 +18,5 @@ rules:
     operator: '>'
     value: 25.0
   action:
-    command: python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 2.0 --take-profit-pct 4.0
-  cooldown: 900
+    command: python ./Trading/alpaca_buy_cli.py upro 5000 --mid-price --stop-loss-pct 2.0 --take-profit-pct 4.0 --exclude-symbols SPXU
+  cooldown: 1800 # 30 minutes (6 bars)

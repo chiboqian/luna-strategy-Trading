@@ -152,11 +152,19 @@ class StreamFramework:
                 with open(file_to_load, 'r') as f:
                     data = json.load(f)
                     for symbol, prices in data.items():
-                        # Validate data format (handle migration from list of floats to list of [close, volume])
+                        # Validate data format (handle migration)
+                        # Old format 1: single floats
+                        # Old format 2: (close, volume) - 2 elements
+                        # New format: (open, high, low, close, volume) - 5 elements
                         if prices and isinstance(prices[0], (int, float)):
-                            # Old format: convert to (price, 0) or discard. Discarding to ensure clean state.
-                            logger.warning(f"Old history format detected for {symbol}. Resetting history.")
+                            # Very old format: single floats - discard
+                            logger.warning(f"Old history format (floats) detected for {symbol}. Resetting history.")
                             self.bar_history[symbol] = deque(maxlen=300)
+                        elif prices and isinstance(prices[0], list) and len(prices[0]) == 2:
+                            # Old format: (close, volume) - migrate to OHLCV with placeholder O/H/L
+                            logger.info(f"Migrating {symbol} from (close, vol) to OHLCV format.")
+                            migrated = [(p[0], p[0], p[0], p[0], p[1]) for p in prices]  # O=H=L=C
+                            self.bar_history[symbol] = deque(migrated, maxlen=300)
                         else:
                             self.bar_history[symbol] = deque(prices, maxlen=300)
                 logger.info(f"Loaded bar history for {len(self.bar_history)} symbols from {file_to_load.name}.")
@@ -231,7 +239,11 @@ class StreamFramework:
                                 self.bar_history[symbol] = deque(maxlen=300)
                             
                             final = self.pending_5m_bars.pop(symbol)
-                            self.bar_history[symbol].append((final['close'], final['volume']))
+                            # Store OHLCV tuple for EMA/ADX calculations
+                            self.bar_history[symbol].append((
+                                final['open'], final['high'], final['low'], 
+                                final['close'], final['volume']
+                            ))
                             count_5m += 1
                             
                     except ValueError:
@@ -462,7 +474,11 @@ class StreamFramework:
             from types import SimpleNamespace
             final_bar = SimpleNamespace(**final_bar_dict)
             
-            self.bar_history[symbol].append((final_bar.close, final_bar.volume))
+            # Store OHLCV tuple for EMA/ADX calculations
+            self.bar_history[symbol].append((
+                final_bar.open, final_bar.high, final_bar.low,
+                final_bar.close, final_bar.volume
+            ))
             
             logger.info(f"Completed 5-min bar for {symbol}: C={final_bar.close} V={final_bar.volume}")
             await self._evaluate_rules(final_bar, self.stock_rules.get(symbol, []), data_type='bar')
@@ -562,6 +578,20 @@ class StreamFramework:
                     return self._calculate_rvol(data.symbol, period)
                 except (IndexError, ValueError):
                     return None
+            elif field.startswith('ema_'):
+                # Format: ema_20 (Exponential Moving Average)
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_ema(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
+            elif field.startswith('adx_'):
+                # Format: adx_14 (Average Directional Index)
+                try:
+                    period = int(field.split('_')[1])
+                    return self._calculate_adx(data.symbol, period)
+                except (IndexError, ValueError):
+                    return None
             else:
                 return getattr(data, field, None)
         else:
@@ -607,8 +637,8 @@ class StreamFramework:
         history = self.bar_history.get(symbol)
         if not history or len(history) < period:
             return None
-        # History items are [close, volume]
-        closes = [x[0] for x in list(history)[-period:]]
+        # History items are (open, high, low, close, volume) - OHLCV
+        closes = [x[3] for x in list(history)[-period:]]
         return sum(closes) / period
 
     def _calculate_vwap(self, symbol: str, period: int) -> Optional[float]:
@@ -616,15 +646,16 @@ class StreamFramework:
         if not history or len(history) < period:
             return None
         subset = list(history)[-period:]
-        total_pv = sum(x[0] * x[1] for x in subset)
-        total_v = sum(x[1] for x in subset)
+        # OHLCV: close=x[3], volume=x[4]
+        total_pv = sum(x[3] * x[4] for x in subset)
+        total_v = sum(x[4] for x in subset)
         return total_pv / total_v if total_v > 0 else None
 
     def _calculate_stddev(self, symbol: str, period: int) -> Optional[float]:
         history = self.bar_history.get(symbol)
         if not history or len(history) < period:
             return None
-        closes = [x[0] for x in list(history)[-period:]]
+        closes = [x[3] for x in list(history)[-period:]]
         mean = sum(closes) / period
         variance = sum((x - mean) ** 2 for x in closes) / period
         return math.sqrt(variance)
@@ -636,7 +667,8 @@ class StreamFramework:
         if not history or len(history) < period:
             return None
         
-        current_price = history[-1][0]
+        # OHLCV: close=x[3]
+        current_price = history[-1][3]
         vwap = self._calculate_vwap(symbol, period)
         stddev = self._calculate_stddev(symbol, period)
         
@@ -652,7 +684,8 @@ class StreamFramework:
         if not history or len(history) < period:
             return None
         
-        current_price = history[-1][0]
+        # OHLCV: close=x[3]
+        current_price = history[-1][3]
         sma = self._calculate_sma(symbol, period)
         stddev = self._calculate_stddev(symbol, period)
         
@@ -666,8 +699,8 @@ class StreamFramework:
         if not history or len(history) < period + 1:
             return None
         
-        # Extract closing prices
-        closes = [x[0] for x in history]
+        # Extract closing prices - OHLCV: close=x[3]
+        closes = [x[3] for x in history]
         
         # Calculate deltas
         deltas = [closes[i+1] - closes[i] for i in range(len(closes)-1)]
@@ -700,16 +733,11 @@ class StreamFramework:
         if not history or len(history) < period:
             return None
         
-        # History items are [close, volume]
-        # Current volume is the last item
-        current_vol = history[-1][1]
+        # OHLCV: volume=x[4]
+        current_vol = history[-1][4]
         
-        # Calculate average volume of PREVIOUS 'period' bars (excluding current to compare against baseline)
-        # OR include current? Standard definition usually compares current bar against historical average.
-        # Let's use the average of the last 'period' bars including current, or strict previous?
-        # Traders usually compare "Current Bar Vol" vs "Avg Vol of last N bars".
-        
-        volumes = [x[1] for x in list(history)[-period:]]
+        # Calculate average volume of last 'period' bars
+        volumes = [x[4] for x in list(history)[-period:]]
         avg_vol = sum(volumes) / period
         
         if avg_vol == 0:
@@ -733,9 +761,9 @@ class StreamFramework:
         if len(history1) < period or len(history2) < period:
             return None
         
-        # Get last 'period' closes for each symbol
-        closes1 = [x[0] for x in list(history1)[-period:]]
-        closes2 = [x[0] for x in list(history2)[-period:]]
+        # Get last 'period' closes for each symbol - OHLCV: close=x[3]
+        closes1 = [x[3] for x in list(history1)[-period:]]
+        closes2 = [x[3] for x in list(history2)[-period:]]
         
         # Ensure we have matching lengths (use minimum)
         min_len = min(len(closes1), len(closes2))
@@ -770,6 +798,143 @@ class StreamFramework:
         z_score = (current_ratio - mean_ratio) / stddev
         logger.debug(f"Z-Score Ratio {sym1}/{sym2}: {z_score:.3f} (ratio={current_ratio:.4f}, mean={mean_ratio:.4f}, std={stddev:.4f})")
         return z_score
+
+    def _calculate_ema(self, symbol: str, period: int) -> Optional[float]:
+        """
+        Calculate Exponential Moving Average.
+        EMA = Close * k + EMA_prev * (1 - k)
+        where k = 2 / (period + 1)
+        """
+        history = self.bar_history.get(symbol)
+        if not history or len(history) < period:
+            return None
+        
+        # OHLCV: close=x[3]
+        closes = [x[3] for x in history]
+        
+        # Calculate multiplier
+        k = 2.0 / (period + 1)
+        
+        # Initialize EMA with SMA of first 'period' bars
+        ema = sum(closes[:period]) / period
+        
+        # Apply EMA formula for remaining bars
+        for close in closes[period:]:
+            ema = close * k + ema * (1 - k)
+        
+        return ema
+
+    def _calculate_adx(self, symbol: str, period: int) -> Optional[float]:
+        """
+        Calculate Average Directional Index (ADX).
+        
+        ADX measures trend strength regardless of direction.
+        Values > 25 indicate strong trend, < 20 indicate weak/no trend.
+        
+        Calculation:
+        1. True Range (TR) = max(H-L, |H-Prev_C|, |L-Prev_C|)
+        2. +DM = max(H - Prev_H, 0) if > (Prev_L - L) else 0
+        3. -DM = max(Prev_L - L, 0) if > (H - Prev_H) else 0
+        4. Smooth TR, +DM, -DM using Wilder's smoothing
+        5. +DI = 100 * Smoothed_+DM / Smoothed_TR
+        6. -DI = 100 * Smoothed_-DM / Smoothed_TR
+        7. DX = 100 * |+DI - -DI| / (+DI + -DI)
+        8. ADX = Smoothed DX
+        """
+        history = self.bar_history.get(symbol)
+        # Need period + 1 bars minimum (to calculate first TR/DM)
+        if not history or len(history) < period + 1:
+            return None
+        
+        bars = list(history)
+        # OHLCV: open=0, high=1, low=2, close=3, volume=4
+        
+        # Calculate TR, +DM, -DM series
+        tr_list = []
+        plus_dm_list = []
+        minus_dm_list = []
+        
+        for i in range(1, len(bars)):
+            high = bars[i][1]
+            low = bars[i][2]
+            prev_close = bars[i-1][3]
+            prev_high = bars[i-1][1]
+            prev_low = bars[i-1][2]
+            
+            # True Range
+            tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+            tr_list.append(tr)
+            
+            # Directional Movement
+            up_move = high - prev_high
+            down_move = prev_low - low
+            
+            if up_move > down_move and up_move > 0:
+                plus_dm_list.append(up_move)
+            else:
+                plus_dm_list.append(0.0)
+                
+            if down_move > up_move and down_move > 0:
+                minus_dm_list.append(down_move)
+            else:
+                minus_dm_list.append(0.0)
+        
+        if len(tr_list) < period:
+            return None
+        
+        # Wilder's smoothing: first value is sum of first 'period' values
+        # Subsequent: prev_smooth - (prev_smooth / period) + current_value
+        
+        # Initial smoothed values (first 'period' items)
+        smoothed_tr = sum(tr_list[:period])
+        smoothed_plus_dm = sum(plus_dm_list[:period])
+        smoothed_minus_dm = sum(minus_dm_list[:period])
+        
+        # Calculate DX series for ADX smoothing
+        dx_list = []
+        
+        # First DI and DX
+        if smoothed_tr > 0:
+            plus_di = 100.0 * smoothed_plus_dm / smoothed_tr
+            minus_di = 100.0 * smoothed_minus_dm / smoothed_tr
+        else:
+            plus_di = 0.0
+            minus_di = 0.0
+        
+        if (plus_di + minus_di) > 0:
+            dx = 100.0 * abs(plus_di - minus_di) / (plus_di + minus_di)
+        else:
+            dx = 0.0
+        dx_list.append(dx)
+        
+        # Continue smoothing for remaining values
+        for i in range(period, len(tr_list)):
+            smoothed_tr = smoothed_tr - (smoothed_tr / period) + tr_list[i]
+            smoothed_plus_dm = smoothed_plus_dm - (smoothed_plus_dm / period) + plus_dm_list[i]
+            smoothed_minus_dm = smoothed_minus_dm - (smoothed_minus_dm / period) + minus_dm_list[i]
+            
+            if smoothed_tr > 0:
+                plus_di = 100.0 * smoothed_plus_dm / smoothed_tr
+                minus_di = 100.0 * smoothed_minus_dm / smoothed_tr
+            else:
+                plus_di = 0.0
+                minus_di = 0.0
+            
+            if (plus_di + minus_di) > 0:
+                dx = 100.0 * abs(plus_di - minus_di) / (plus_di + minus_di)
+            else:
+                dx = 0.0
+            dx_list.append(dx)
+        
+        if len(dx_list) < period:
+            return None
+        
+        # Smooth DX to get ADX (Wilder's smoothing)
+        adx = sum(dx_list[:period]) / period
+        for dx in dx_list[period:]:
+            adx = (adx * (period - 1) + dx) / period
+        
+        return adx
 
     async def _trigger_action(self, rule: Dict, data: Any):
         rule_name = rule.get('name', 'unnamed_rule')
