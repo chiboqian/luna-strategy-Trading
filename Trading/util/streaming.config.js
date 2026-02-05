@@ -6,8 +6,8 @@ module.exports = {
     script: "./Trading/stream_framework.py",
     args: "--config ./config/streaming_rules/",
     // USE ABSOLUTE PATHS to avoid ambiguity
-    interpreter: "/home/paper1/luna-strategy-Trading/Trading/.venv/bin/python", 
-    cwd: "/home/paper1/luna-strategy-Trading/Trading", 
+    interpreter: "~/luna-strategy-Trading/Trading/.venv/bin/python", 
+    cwd: "~/luna-strategy-Trading/Trading", 
     autorestart: true,
     watch: true,
     // Ignore logs to prevent infinite restart loops
